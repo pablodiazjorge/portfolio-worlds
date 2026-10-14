@@ -277,24 +277,43 @@ def terrain_color(x, y):
     return Vector(c[:3])
 
 
-# --- distant ring of mountains for the horizon ---------------------------------
+# --- the far ranges -------------------------------------------------------------------------------------
+# Three ranges at growing distance, each a band whose top is a jagged ridgeline. The farther
+# ones stand higher and paler, so the haze reads in layers behind the valley; snow caps the peaks.
 ring_verts, ring_faces, ring_colors = [], [], []
-SEG, ROWS = 96, 5
-for r in range(ROWS):
-    radius = 300.0 + r * 70.0
-    for s in range(SEG):
-        a = s / SEG * math.tau
-        x, y = math.cos(a) * radius, math.sin(a) * radius
-        ridge = noise.ridged_multi_fractal(Vector((math.cos(a) * 2.2, math.sin(a) * 2.2, r * 0.7)), 0.9, 2.0, 4, 1.0, 2.0)
-        z = (0.0 if r == 0 else 30.0 + ridge * 55.0 + r * 12.0) if r < ROWS - 1 else 10.0
-        ring_verts.append((x, y, z))
-        tone = Vector(pw.hex_color("#6b6f8c")[:3]).lerp(Vector(pw.hex_color("#e9e7ee")[:3]), pw.smoothstep(95.0, 130.0, z))
-        ring_colors.append((tone.x, tone.y, tone.z, 1.0))
-for r in range(ROWS - 1):
-    for s in range(SEG):
-        a = r * SEG + s
-        b = r * SEG + (s + 1) % SEG
-        ring_faces += [(a, b, b + SEG), (a, b + SEG, a + SEG)]
+RANGE_SNOW = Vector(pw.hex_color("#eceaf2")[:3])
+
+
+def far_range(radius, base, peak, freq, seed_z, low_hex, high_hex, snow_from, segments=220):
+    low = Vector(pw.hex_color(low_hex)[:3])
+    high = Vector(pw.hex_color(high_hex)[:3])
+    start = len(ring_verts)
+    # bottom, foot, shoulder, crest; the lower rows step in so the band has a face to shade
+    rows = ((-12.0, -34.0, 0.0), (0.38, -20.0, 0.0), (0.8, -7.0, 0.35), (1.0, 0.0, 0.0))
+    for share, inset, jitter in rows:
+        for s_ in range(segments):
+            a = s_ / segments * math.tau
+            ridge = noise.ridged_multi_fractal(Vector((math.cos(a) * freq, math.sin(a) * freq, seed_z)), 0.95, 2.1, 5, 1.0, 2.0)
+            crest = base + ridge * peak
+            z = share if share < 0 else crest * share
+            wobble = jitter * 6.0 * noise.noise(Vector((math.cos(a) * 9.0, math.sin(a) * 9.0, seed_z + 3.0)))
+            rad = radius + inset + wobble
+            ring_verts.append((math.cos(a) * rad, math.sin(a) * rad, z))
+            tone = low.lerp(high, pw.smoothstep(base * 0.4, base + peak * 0.8, z))
+            tone = tone.lerp(RANGE_SNOW, pw.smoothstep(snow_from, snow_from + 14.0, z) * 0.85)
+            ring_colors.append((tone.x, tone.y, tone.z, 1.0))
+    for r_ in range(len(rows) - 1):
+        for s_ in range(segments):
+            a_ = start + r_ * segments + s_
+            b_ = start + r_ * segments + (s_ + 1) % segments
+            ring_faces.append((a_, b_, b_ + segments))
+            ring_faces.append((a_, b_ + segments, a_ + segments))
+
+
+# all beyond the opening camera, which stands some 275 from the centre
+far_range(335.0, 22.0, 52.0, 2.7, 0.5, "#5a5d7c", "#878aa6", 68.0)
+far_range(440.0, 34.0, 64.0, 1.9, 2.3, "#777896", "#a2a0b9", 80.0)
+far_range(560.0, 46.0, 76.0, 1.35, 4.1, "#9796b0", "#c2c0d1", 98.0)
 ring = pw.mesh_object("horizon", ring_verts, ring_faces, pw.vertex_color_material("horizon"))
 pw.set_vertex_colors(ring, ring_colors)
 
@@ -317,6 +336,9 @@ M = {
     "stone": pw.material("stone", "#8b8494", 0.95),
     "stone_light": pw.material("stone_light", "#b1aab5", 0.95),
     "roof": pw.material("roof", "#7a3b2e", 0.8),
+    "roof_dark": pw.material("roof_dark", "#5e2b22", 0.85),
+    "shutter": pw.material("shutter", "#3d6b4f", 0.7),
+    "bronze": pw.material("bronze", "#a8834e", 0.45, 0.6),
     "solar": pw.material("solar", "#1d2f55", 0.3, 0.4),
     "white": pw.material("white_paint", "#eeeef0", 0.5),
     "sign": pw.material("sign_yellow", "#f3c22f", 0.6),
@@ -423,6 +445,53 @@ class Kit:
         self._place(bm, vs, origin, rot)
         return vs
 
+    def sheet(self, mat, origin, rot, corners, nu=3, nv=2, sag=0.0, inward=(0, 0, 0)):
+        """A fabric panel over four corners (bilinear, a b c d round the edge), drawn in by `sag`
+        towards `inward` in the middle, the way cloth gives between its poles."""
+        bm = self.bm(mat)
+        a, b, c, d = (Vector(p) for p in corners)
+        pull = Vector(inward)
+        grid = []
+        for j in range(nv + 1):
+            v = j / nv
+            row = []
+            for i in range(nu + 1):
+                u = i / nu
+                q = a.lerp(b, u).lerp(d.lerp(c, u), v) + pull * (sag * math.sin(math.pi * u) * math.sin(math.pi * v))
+                row.append(bm.verts.new(q))
+            grid.append(row)
+        for j in range(nv):
+            for i in range(nu):
+                bm.faces.new((grid[j][i], grid[j][i + 1], grid[j + 1][i + 1], grid[j + 1][i]))
+        vs = [v for row in grid for v in row]
+        self._place(bm, vs, origin, rot)
+        return vs
+
+    def fly(self, mat, origin, rot, r, squash=0.72, hem=0.06, sag=0.08, around=28, rings=7):
+        """A dome tent's fly over two crossing poles: between the poles the fabric is drawn in,
+        most at mid height, and it ends in a hem above the ground."""
+        bm = self.bm(mat)
+        grid = []
+        for j in range(rings):
+            theta = j / rings * (math.pi / 2)
+            row = []
+            for i in range(around):
+                phi = i / around * math.tau
+                pull = sag * math.cos(2 * phi) ** 2 * math.sin(2 * theta)
+                rad = r * (1.0 - pull)
+                row.append(bm.verts.new((math.cos(theta) * math.cos(phi) * rad, math.cos(theta) * math.sin(phi) * rad, hem + math.sin(theta) * r * squash)))
+            grid.append(row)
+        apex = bm.verts.new((0, 0, hem + r * squash))
+        for j in range(rings - 1):
+            for i in range(around):
+                n = (i + 1) % around
+                bm.faces.new((grid[j][i], grid[j][n], grid[j + 1][n], grid[j + 1][i]))
+        for i in range(around):
+            bm.faces.new((grid[-1][i], grid[-1][(i + 1) % around], apex))
+        vs = [v for row in grid for v in row] + [apex]
+        self._place(bm, vs, origin, rot)
+        return vs
+
     def finish(self, parent=None, smooth=()):
         for mat, bm in self.meshes.items():
             obj = pw.bm_object(f"{self.prefix}_{mat}", bm, M[mat], smooth=mat in smooth)
@@ -455,58 +524,117 @@ def frame_rot(site):
 # --- prop builders (local space: +Y forward, origin on the ground) ---------------------------
 
 
+def guy_line(origin, rot, anchor, stake):
+    """A guy line with its tensioner and a peg."""
+    k = props
+    anchor, stake = Vector(anchor), Vector(stake)
+    k.cyl("rope", origin, rot, anchor, stake, 0.007, seg=4)
+    k.box("metal", origin, rot, anchor.lerp(stake, 0.72), (0.035, 0.035, 0.018))
+    k.cyl("metal", origin, rot, (stake.x, stake.y, -0.05), (stake.x, stake.y, 0.08), 0.014, seg=4)
+    k.box("metal", origin, rot, (stake.x, stake.y, 0.085), (0.05, 0.016, 0.012))
+
+
+def boots(origin, rot):
+    """A pair of hiking boots left by a tent door."""
+    k = props
+    for side in (-1, 1):
+        x = side * 0.09
+        k.box("wood_dark", origin, rot, (x, 0.02, 0.025), (0.1, 0.28, 0.05))
+        k.box("wood", origin, rot, (x, -0.03, 0.12), (0.095, 0.15, 0.16))
+        k.box("fabric_red", origin, rot, (x, -0.03, 0.205), (0.1, 0.155, 0.02))
+        k.box("fabric_dark", origin, rot, (x, 0.07, 0.09), (0.06, 0.08, 0.05))
+
+
+def stove(origin, rot):
+    """A camping stove with a pot and a mug beside it."""
+    k = props
+    k.cyl("metal", origin, rot, (0, 0, 0), (0, 0, 0.1), 0.07, seg=10)
+    for a in (0.0, 2.1, 4.2):
+        k.box("metal_dark", origin, rot, (math.cos(a) * 0.08, math.sin(a) * 0.08, 0.11), (0.06, 0.012, 0.012))
+    k.cyl("metal_dark", origin, rot, (0, 0, 0.12), (0, 0, 0.26), 0.1, seg=12)
+    k.cyl("metal", origin, rot, (0, 0, 0.26), (0, 0, 0.275), 0.105, seg=12)
+    k.cyl("fabric_blue", origin, rot, (0.24, 0.05, 0), (0.24, 0.05, 0.09), 0.04, seg=8)
+
+
 def a_frame_tent(origin, rot, color, size=1.0):
+    """Ridge tent. The fly sags a little between its poles and stops above a dark bathtub floor;
+    the door is rolled back on a mat and a sleeping bag, with seams, a vent, guy lines,
+    tensioners, pegs and a pair of boots at the door."""
     w, l, h = 1.25 * size, 1.9 * size, 1.0 * size
     k = props
-    # a muted groundsheet that only peeks out round the tent; a dark one read as a hole in the ground
     k.box("groundsheet", origin, rot, (0, 0, 0.01), (w + 0.16, l + 0.2, 0.02))
-    over = 0.12 * size
+    tub = 0.1 * size
+    # inner tent: bathtub floor walls and the sleeping things seen through the door
     for side in (-1, 1):
-        k.poly(color, origin, rot, [(side * w / 2, -l / 2, 0.02), (side * w / 2, l / 2, 0.02), (0, l / 2 + over, h), (0, -l / 2 - over, h)][::side])
-    k.poly(color, origin, rot, [(w / 2, l / 2 - 0.02, 0.02), (-w / 2, l / 2 - 0.02, 0.02), (0, l / 2 - 0.02, h)])
+        k.box("groundsheet", origin, rot, (side * (w / 2 - 0.05), 0, tub / 2 + 0.02), (0.03, l - 0.1, tub))
+    k.box("fabric_blue", origin, rot, (0.05, -l / 2 + 0.55, 0.035), (0.5 * size, 0.95 * size, 0.025))
+    k.cyl("fabric_red", origin, rot, (-0.15 * size, -l / 2 + 0.2, 0.1), (-0.15 * size, -l / 2 + 0.95 * size, 0.1), 0.09 * size, seg=8)
+    over = 0.12 * size
+    # fly: two panels from a hem above the ground to the ridge, drawn in between the poles
+    for side in (-1, 1):
+        inward = Vector((-side * h, 0, -w / 2)).normalized()
+        corners = [(side * (w / 2 + 0.05), -l / 2, tub * 0.7), (side * (w / 2 + 0.05), l / 2, tub * 0.7), (0, l / 2 + over, h), (0, -l / 2 - over, h)]
+        k.sheet(color, origin, rot, corners, nu=4, nv=2, sag=0.05 * size, inward=inward)
+        # a seam down the middle of each panel
+        k.cyl("fabric_dark", origin, rot, (side * (w / 2 + 0.05), 0, tub * 0.7), (0, 0, h), 0.006, seg=3)
+    k.cyl("fabric_dark", origin, rot, (0, -l / 2 - over, h + 0.006), (0, l / 2 + over, h + 0.006), 0.012, seg=4)
+    # back wall with a vent
+    k.poly(color, origin, rot, [(w / 2, l / 2 - 0.02, tub * 0.7), (-w / 2, l / 2 - 0.02, tub * 0.7), (0, l / 2 - 0.02, h)])
+    k.poly("fabric_dark", origin, rot, [(0.1, l / 2 + 0.0, h * 0.62), (-0.1, l / 2 + 0.0, h * 0.62), (0, l / 2 + 0.0, h * 0.82)])
+    # front: open door, panels either side, flaps tied back and the door rolled up beside it
     door = 0.34 * size
     k.poly("fabric_dark", origin, rot, [(-door, -l / 2 + 0.02, 0.02), (door, -l / 2 + 0.02, 0.02), (0, -l / 2 + 0.02, h * 0.82)])
-    k.poly(color, origin, rot, [(-w / 2, -l / 2, 0.02), (-door, -l / 2, 0.02), (0, -l / 2, h * 0.82), (0, -l / 2, h)][::-1])
-    k.poly(color, origin, rot, [(door, -l / 2, 0.02), (w / 2, -l / 2, 0.02), (0, -l / 2, h), (0, -l / 2, h * 0.82)][::-1])
-    # flaps tied back on each side of the door
+    k.poly(color, origin, rot, [(-w / 2, -l / 2, tub * 0.7), (-door, -l / 2, 0.02), (0, -l / 2, h * 0.82), (0, -l / 2, h)][::-1])
+    k.poly(color, origin, rot, [(door, -l / 2, 0.02), (w / 2, -l / 2, tub * 0.7), (0, -l / 2, h), (0, -l / 2, h * 0.82)][::-1])
     for side in (-1, 1):
         k.poly(color, origin, rot, [(side * door, -l / 2 - 0.01, 0.02), (side * (door + 0.22), -l / 2 - 0.2, 0.05), (side * 0.06, -l / 2 - 0.02, h * 0.7)][::side])
-    # ridge pole ends, guy lines and stakes
+    k.cyl(color, origin, rot, (door * 0.95, -l / 2 - 0.05, 0.06), (0.08, -l / 2 - 0.05, h * 0.74), 0.035 * size, seg=6)
+    k.cyl("fabric_dark", origin, rot, (0, -l / 2 - 0.012, h * 0.82), (0, -l / 2 - 0.012, h * 0.98), 0.008, seg=3)
+    # ridge poles, guy lines with tensioners and pegs
     for end in (-1, 1):
         top = (0, end * (l / 2 + over), h)
-        stake = (0, end * (l / 2 + 0.75 * size), 0.02)
-        k.cyl("rope", origin, rot, top, stake, 0.008, seg=4)
-        k.cyl("metal", origin, rot, (stake[0], stake[1], -0.05), (stake[0], stake[1], 0.07), 0.015, seg=4)
         k.cyl("wood_dark", origin, rot, (0, end * (l / 2 + over * 0.6), 0), (0, end * (l / 2 + over * 0.6), h + 0.05), 0.02, seg=5)
+        guy_line(origin, rot, top, (0, end * (l / 2 + 0.75 * size), 0.02))
     for side in (-1, 1):
         for end in (-0.3, 0.3):
-            anchor = (side * w * 0.26, end * l, h * 0.5)
-            stake = (side * (w / 2 + 0.55 * size), end * l * 1.15, 0.02)
-            k.cyl("rope", origin, rot, anchor, stake, 0.007, seg=4)
-            k.cyl("metal", origin, rot, (stake[0], stake[1], -0.05), (stake[0], stake[1], 0.07), 0.014, seg=4)
+            guy_line(origin, rot, (side * w * 0.26, end * l, h * 0.5), (side * (w / 2 + 0.55 * size), end * l * 1.15, 0.02))
+    boots(origin + Matrix.Rotation(rot, 3, "Z") @ Vector((-0.42 * size, -l / 2 - 0.42, 0)), rot + 0.25)
 
 
 def dome_tent(origin, rot, color, r=0.85):
+    """Dome tent: the fly drawn in between two crossing poles over a dark bathtub floor, a vent
+    hood on top, a vestibule with the inner door rolled back, guy lines, tensioners and boots."""
     k = props
+    squash, hem = 0.72, 0.07
     k.box("groundsheet", origin, rot, (0, 0, 0.01), (2 * r + 0.08, 2 * r + 0.08, 0.02))
-    k.dome(color, origin, rot, (0, 0, 0.02), r, squash=0.72, seg=14)
-    # crossing poles
+    k.cyl("groundsheet", origin, rot, (0, 0, 0.02), (0, 0, 0.1), r * 0.97, r * 0.95, seg=16)
+    k.fly(color, origin, rot, r, squash=squash, hem=hem, sag=0.085)
+    # crossing poles riding on the fly
     for angle in (math.pi / 4, -math.pi / 4):
         pts = []
-        for s in range(9):
-            t = s / 8 * math.pi
-            pts.append(Matrix.Rotation(angle, 3, "Z") @ Vector((math.cos(t) * r * 1.01, 0, 0.02 + math.sin(t) * r * 0.73)))
+        for s_ in range(11):
+            t = s_ / 10 * math.pi
+            pts.append(Matrix.Rotation(angle, 3, "Z") @ Vector((math.cos(t) * r * 1.012, 0, hem + math.sin(t) * r * squash * 1.012)))
         for a, b in zip(pts, pts[1:]):
             k.cyl("metal_dark", origin, rot, a, b, 0.016, seg=4)
-    # vestibule over the door
-    v = 0.55 * r
-    k.poly(color, origin, rot, [(-v, -r * 0.55, 0.02), (0, -r - 0.42, 0.02), (0, -r * 0.62, r * 0.6)])
-    k.poly(color, origin, rot, [(0, -r - 0.42, 0.02), (v, -r * 0.55, 0.02), (0, -r * 0.62, r * 0.6)])
-    k.poly("fabric_dark", origin, rot, [(-v * 0.55, -r * 0.6, 0.03), (v * 0.55, -r * 0.6, 0.03), (0, -r * 0.64, r * 0.5)])
+    # vent hood at the crown
+    top = hem + r * squash
+    k.dome(color, origin, rot, (0.0, 0.12, top - 0.03), 0.22, squash=0.55, seg=10)
+    k.box("fabric_dark", origin, rot, (0.0, 0.31, top - 0.02), (0.22, 0.02, 0.06))
+    # vestibule over the door: two drawn-in panels to a peak, the inner door rolled back
+    v = 0.58 * r
+    peak = (0, -r - 0.48, 0.03)
+    crown = (0, -r * 0.6, r * 0.62)
     for side in (-1, 1):
-        stake = (side * (r + 0.45), 0.25, 0.02)
-        k.cyl("rope", origin, rot, (side * r * 0.62, 0.15, r * 0.45), stake, 0.007, seg=4)
-        k.cyl("metal", origin, rot, (stake[0], stake[1], -0.05), (stake[0], stake[1], 0.07), 0.014, seg=4)
+        corners = [(side * v, -r * 0.55, 0.05), peak, peak, crown]
+        k.sheet(color, origin, rot, [corners[0], corners[1], corners[3], corners[3]], nu=2, nv=2, sag=0.04, inward=(side * -0.6, 0.6, -0.2))
+    k.poly("fabric_dark", origin, rot, [(-v * 0.55, -r * 0.6, 0.03), (v * 0.55, -r * 0.6, 0.03), (0, -r * 0.64, r * 0.5)])
+    k.cyl(color, origin, rot, (v * 0.5, -r * 0.66, 0.05), (0.08, -r * 0.7, r * 0.46), 0.03, seg=6)
+    for corner in (math.pi / 4, 3 * math.pi / 4, -math.pi / 4, -3 * math.pi / 4):
+        d = Vector((math.cos(corner), math.sin(corner), 0))
+        anchor = d * (r * 0.72) + Vector((0, 0, hem + r * squash * 0.68))
+        guy_line(origin, rot, anchor, d * (r + 0.55) + Vector((0, 0, 0.02)))
+    boots(origin + Matrix.Rotation(rot, 3, "Z") @ Vector((-0.45, -r - 0.62, 0)), rot - 0.2)
 
 
 def backpack(origin, rot, color):
@@ -672,42 +800,197 @@ def cairn(origin, rot, size=1.0):
 
 
 def hut(origin, rot):
-    """Mountain refuge: stone base, timber walls, pitched roof, chimney and lit windows."""
+    """Mountain refuge as a log cabin. Logs cross at the corners, cut round the door and windows
+    with pale ends, over a base of facing stones. Above them sits a shingled roof with fascia
+    boards and a stone chimney in courses. It has windows with frames, mullions, shutters and
+    flower boxes, a plank door with a sign and a lantern, a porch with balusters and steps, and
+    a gutter that runs to a rain barrel."""
     k = props
     W, L, H = 3.6, 2.8, 1.9
-    k.box("stone", origin, rot, (0, 0, 0.25), (W + 0.3, L + 0.3, 0.5))
-    k.box("wood", origin, rot, (0, 0, 0.5 + H / 2), (W, L, H))
-    for z in range(1, 7):
-        for side in (-1, 1):
-            k.box("wood_dark", origin, rot, (0, side * (L / 2 + 0.005), 0.5 + z * H / 7), (W + 0.02, 0.012, 0.03))
-            k.box("wood_dark", origin, rot, (side * (W / 2 + 0.005), 0, 0.5 + z * H / 7), (0.012, L + 0.02, 0.03))
-    ridge = 0.5 + H + 1.2
-    for side in (-1, 1):
-        k.poly("wood", origin, rot, [(side * W / 2, -L / 2, 0.5 + H), (side * W / 2, L / 2, 0.5 + H), (side * W / 2, 0, ridge)][::side])
+    base = 0.5
+    top = base + H
+    ridge = top + 1.2
     pitch = math.atan2(1.2, L / 2)
+    R = Matrix.Rotation(rot, 3, "Z")
+
+    # base: a mortar plinth faced with stones
+    k.box("stone", origin, rot, (0, 0, base / 2), (W + 0.2, L + 0.2, base))
+    for row in range(2):
+        z = 0.12 + row * 0.24
+        for wall, (length, fixed, along_x) in enumerate(((W + 0.3, L / 2 + 0.11, True), (W + 0.3, -L / 2 - 0.11, True), (L + 0.3, W / 2 + 0.11, False), (L + 0.3, -W / 2 - 0.11, False))):
+            count = int(length / 0.36)
+            for i in range(count):
+                t = -length / 2 + (i + 0.5 + (0.5 if row % 2 else 0.0)) * length / count
+                if abs(t) > length / 2 - 0.05:
+                    continue
+                c = (t, fixed, z) if along_x else (fixed, t, z)
+                k.ico("stone_light" if (i + row + wall) % 3 == 0 else "stone", origin, rot, c, 0.17, (1.25, 0.75, 0.7) if along_x else (0.75, 1.25, 0.7))
+
+    # log walls with their openings (x or y range, z range) per wall
+    door = (-0.98, -0.22, base, base + 1.62)
+    front_windows = [(0.45, 0.95, 1.3, 1.85), (1.1, 1.6, 1.3, 1.85)]
+    side_windows = [(-0.8, -0.3, 1.3, 1.85), (0.3, 0.8, 1.3, 1.85)]
+    walls = (
+        ("front", True, -L / 2, [door] + front_windows),
+        ("back", True, L / 2, []),
+        ("right", False, W / 2, side_windows),
+        ("left", False, -W / 2, []),
+    )
+    k.box("wood_dark", origin, rot, (0, 0, base + H / 2), (W - 0.16, L - 0.16, H))
+    logs = 8
+    radius = 0.12
+    for row in range(logs):
+        z = base + radius + row * (H - 2 * radius) / (logs - 1)
+        for name, along_x, fixed, openings in walls:
+            length = W if along_x else L
+            # front and back logs run long on even rows, the side logs on odd rows
+            long_row = (row % 2 == 0) == along_x
+            reach = length / 2 + (0.24 if long_row else 0.1)
+            cuts = sorted((o[0], o[1]) for o in openings if o[2] - radius < z < o[3] + radius)
+            spans, start = [], -reach
+            for a, b in cuts:
+                if a > start:
+                    spans.append((start, a))
+                start = max(start, b)
+            if start < reach:
+                spans.append((start, reach))
+            for a, b in spans:
+                pa = (a, fixed, z) if along_x else (fixed, a, z)
+                pb = (b, fixed, z) if along_x else (fixed, b, z)
+                k.cyl("wood" if row % 3 else "wood_light", origin, rot, pa, pb, radius, seg=7)
+            if long_row:
+                for end in (-reach, reach):
+                    e = (end, fixed, z) if along_x else (fixed, end, z)
+                    inside = Vector(e) - (Vector((math.copysign(0.012, end), 0, 0)) if along_x else Vector((0, math.copysign(0.012, end), 0)))
+                    k.cyl("wood_light", origin, rot, inside, e, radius * 0.92, seg=7)
+
+    # gables: vertical boards, a round vent
     for side in (-1, 1):
-        k.box("roof", origin, rot, (0, side * (L / 4 + 0.05), 0.5 + H + 0.62), (W + 0.6, L / 2 / math.cos(pitch) + 0.45, 0.1), tilt=("X", -side * pitch))
-    k.box("roof", origin, rot, (0, 0, ridge + 0.04), (W + 0.62, 0.16, 0.08))
-    # chimney with smoke
-    k.box("stone_light", origin, rot, (W * 0.25, L * 0.15, ridge), (0.45, 0.45, 1.2))
-    k.box("stone", origin, rot, (W * 0.25, L * 0.15, ridge + 0.62), (0.55, 0.55, 0.08))
-    chimney_top = origin + Matrix.Rotation(rot, 3, "Z") @ Vector((W * 0.25, L * 0.15, ridge + 0.75))
-    pw.empty("smoke_hut", chimney_top)
-    # door, windows and a small porch on the front (-Y)
-    k.box("wood_dark", origin, rot, (-0.6, -L / 2 - 0.02, 0.5 + 0.8), (0.75, 0.05, 1.6))
-    k.box("white", origin, rot, (-0.6, -L / 2 - 0.03, 0.5 + 1.62), (0.85, 0.04, 0.06))
-    for x in (0.75, 1.35):
-        k.box("white", origin, rot, (x, -L / 2 - 0.02, 1.55), (0.5, 0.04, 0.55))
-        k.box("window", origin, rot, (x, -L / 2 - 0.04, 1.55), (0.38, 0.03, 0.42))
-    for y in (-0.5, 0.6):
-        k.box("white", origin, rot, (W / 2 + 0.02, y, 1.55), (0.04, 0.5, 0.55))
-        k.box("window", origin, rot, (W / 2 + 0.04, y, 1.55), (0.03, 0.38, 0.42))
-    k.box("wood_light", origin, rot, (0, -L / 2 - 0.65, 0.48), (W, 1.2, 0.08))
+        for b_ in range(9):
+            y = -L / 2 + (b_ + 0.5) * L / 9
+            gable_h = (1.0 - abs(y) / (L / 2)) * 1.2
+            if gable_h < 0.05:
+                continue
+            k.box("wood_light", origin, rot, (side * (W / 2 + 0.04), y, top + gable_h / 2), (0.04, L / 9 - 0.015, gable_h))
+        k.cyl("wood_dark", origin, rot, (side * (W / 2 + 0.06), 0, top + 0.6), (side * (W / 2 + 0.08), 0, top + 0.6), 0.14, seg=10)
+        k.cyl("fabric_dark", origin, rot, (side * (W / 2 + 0.07), 0, top + 0.6), (side * (W / 2 + 0.09), 0, top + 0.6), 0.1, seg=10)
+
+    # roof: underlay, shingle rows in two shades, fascia and barge boards, ridge cap
+    run = L / 2 + 0.38
+    slope = run / math.cos(pitch)
+    rows = 7
+    for side in (-1, 1):
+        normal = Vector((0, side * math.sin(pitch), math.cos(pitch)))
+        k.box("roof", origin, rot, (0, side * (L / 4 + 0.08), top + 0.62), (W + 0.6, L / 2 / math.cos(pitch) + 0.5, 0.1), tilt=("X", -side * pitch))
+        for i in range(rows):
+            along = run * (1.0 - (i + 0.5) / rows)
+            centre = Vector((0, side * along, ridge - along * math.tan(pitch))) + normal * (0.12 + 0.015 * (i % 2))
+            k.box("roof_dark" if i % 2 else "roof", origin, rot, tuple(centre), (W + 0.62, slope / rows * 1.18, 0.05), tilt=("X", -side * pitch))
+        eave = Vector((0, side * run, ridge - run * math.tan(pitch))) + normal * 0.04
+        k.box("wood_dark", origin, rot, tuple(eave - Vector((0, 0, 0.06))), (W + 0.66, 0.05, 0.16))
+        for end in (-1, 1):
+            mid = Vector((end * (W / 2 + 0.32), side * run / 2, ridge - run / 2 * math.tan(pitch))) + normal * 0.08
+            k.box("wood_dark", origin, rot, tuple(mid), (0.05, slope + 0.05, 0.16), tilt=("X", -side * pitch))
+        # gutter along the eave
+        k.box("metal_dark", origin, rot, tuple(eave + Vector((0, side * 0.08, -0.16))), (W + 0.5, 0.1, 0.07))
+    k.box("wood_dark", origin, rot, (0, 0, ridge + 0.13), (W + 0.66, 0.2, 0.1))
+
+    # chimney in courses of stone, with a cap and a flue
+    cx, cy = W * 0.25, L * 0.15
+    for c in range(7):
+        jitter = 0.03 * ((c * 7) % 3 - 1)
+        k.box("stone_light" if c % 2 else "stone", origin, rot, (cx + jitter, cy, ridge - 0.4 + c * 0.2), (0.5 + jitter, 0.5 - jitter, 0.21))
+    k.box("stone", origin, rot, (cx, cy, ridge + 1.02), (0.62, 0.62, 0.07))
+    k.cyl("metal_dark", origin, rot, (cx, cy, ridge + 1.05), (cx, cy, ridge + 1.3), 0.07, seg=8)
+    pw.empty("smoke_hut", origin + R @ Vector((cx, cy, ridge + 1.36)))
+
+    # door: planks with a Z brace, frame, handle, sign above and a lantern beside it
+    dx = (door[0] + door[1]) / 2
+    dw = door[1] - door[0]
+    for p_ in range(3):
+        k.box("wood_dark", origin, rot, (door[0] + dw * (p_ + 0.5) / 3, -L / 2 - 0.04, base + 0.8), (dw / 3 - 0.02, 0.05, 1.58))
+    for z in (base + 0.35, base + 1.25):
+        k.box("wood", origin, rot, (dx, -L / 2 - 0.075, z), (dw - 0.06, 0.03, 0.1))
+    brace = math.atan2(0.9, dw - 0.1)
+    k.box("wood", origin, rot, (dx, -L / 2 - 0.075, base + 0.8), (math.hypot(0.9, dw - 0.1), 0.03, 0.09), tilt=("Y", -brace))
+    k.box("metal", origin, rot, (door[1] - 0.1, -L / 2 - 0.1, base + 0.85), (0.04, 0.04, 0.12))
+    for x in (door[0] - 0.05, door[1] + 0.05):
+        k.box("wood_light", origin, rot, (x, -L / 2 - 0.05, base + 0.82), (0.08, 0.07, 1.68))
+    k.box("wood_light", origin, rot, (dx, -L / 2 - 0.05, base + 1.68), (dw + 0.18, 0.07, 0.08))
+    k.box("wood_light", origin, rot, (dx, -L / 2 - 0.08, base + 1.86), (1.0, 0.04, 0.24))
+    k.box("sign", origin, rot, (dx, -L / 2 - 0.1, base + 1.86), (0.86, 0.02, 0.15))
+    for i in range(4):
+        k.box("fabric_dark", origin, rot, (dx - 0.28 + i * 0.16, -L / 2 - 0.112, base + 1.86), (0.1, 0.006, 0.04))
+    k.box("wood_dark", origin, rot, (door[0] - 0.32, -L / 2 - 0.12, base + 1.62), (0.05, 0.22, 0.05))
+    k.box("metal_dark", origin, rot, (door[0] - 0.32, -L / 2 - 0.24, base + 1.58), (0.12, 0.12, 0.03))
+    k.box("lantern", origin, rot, (door[0] - 0.32, -L / 2 - 0.24, base + 1.5), (0.09, 0.09, 0.12))
+    k.box("metal_dark", origin, rot, (door[0] - 0.32, -L / 2 - 0.24, base + 1.43), (0.11, 0.11, 0.025))
+
+    # windows: frame, mullions, glass, sill, open shutters and a flower box
+    def window(centre, along_x, out):
+        cx_, cz = centre
+        frame = (0.56, 0.6)
+        def place(u, depth, size):
+            return ((cx_ + u, out + depth, cz), size) if along_x else ((out + depth, cx_ + u, cz), (size[1], size[0], size[2]))
+        sign = math.copysign(1.0, out)
+        c, sz = place(0, sign * 0.03, (frame[0] * 0.82, 0.03, frame[1] * 0.85))
+        k.box("window", origin, rot, c, sz)
+        for u, wsz in ((-frame[0] / 2, 0.06), (frame[0] / 2, 0.06)):
+            c, sz = place(u, sign * 0.05, (wsz, 0.06, frame[1]))
+            k.box("white", origin, rot, c, sz)
+        for dz in (-frame[1] / 2, frame[1] / 2):
+            c, sz = (((cx_, out + sign * 0.05, cz + dz), (frame[0], 0.06, 0.06)) if along_x else ((out + sign * 0.05, cx_, cz + dz), (0.06, frame[0], 0.06)))
+            k.box("white", origin, rot, c, sz)
+        c, sz = place(0, sign * 0.055, (0.035, 0.04, frame[1]))
+        k.box("white", origin, rot, c, sz)
+        c, sz = (((cx_, out + sign * 0.055, cz), (frame[0], 0.04, 0.035)) if along_x else ((out + sign * 0.055, cx_, cz), (0.04, frame[0], 0.035)))
+        k.box("white", origin, rot, c, sz)
+        for u in (-1, 1):
+            c, sz = place(u * (frame[0] / 2 + 0.17), sign * 0.06, (0.28, 0.03, frame[1] * 0.95))
+            k.box("shutter", origin, rot, c, sz)
+            for slat in range(4):
+                c, sz = (((cx_ + u * (frame[0] / 2 + 0.17), out + sign * 0.08, cz - 0.2 + slat * 0.13), (0.24, 0.01, 0.02)) if along_x else ((out + sign * 0.08, cx_ + u * (frame[0] / 2 + 0.17), cz - 0.2 + slat * 0.13), (0.01, 0.24, 0.02)))
+                k.box("roof_dark", origin, rot, c, sz)
+        box_c = ((cx_, out + sign * 0.14, cz - frame[1] / 2 - 0.1) if along_x else (out + sign * 0.14, cx_, cz - frame[1] / 2 - 0.1))
+        k.box("wood_dark", origin, rot, box_c, (frame[0] + 0.1, 0.18, 0.14) if along_x else (0.18, frame[0] + 0.1, 0.14))
+        for f in range(5):
+            u = -0.24 + f * 0.12
+            fc = ((cx_ + u, out + sign * 0.14, cz - frame[1] / 2 - 0.0) if along_x else (out + sign * 0.14, cx_ + u, cz - frame[1] / 2 - 0.0))
+            k.ico("bush", origin, rot, fc, 0.07, (1.0, 1.0, 0.8))
+            k.ico("flower_pink" if f % 2 else "flower_yellow", origin, rot, (fc[0], fc[1], fc[2] + 0.07), 0.035)
+
+    for a, b, z0, z1 in front_windows:
+        window(((a + b) / 2, (z0 + z1) / 2), True, -L / 2 - 0.12)
+    for a, b, z0, z1 in side_windows:
+        window(((a + b) / 2, (z0 + z1) / 2), False, W / 2 + 0.12)
+
+    # porch: boards, steps, posts with braces, balusters, a shingled roof
+    py = -L / 2 - 0.68
+    for b_ in range(7):
+        k.box("wood_light" if b_ % 2 else "wood", origin, rot, (0, py - 0.55 + b_ * 0.16 + 0.08, 0.47), (W, 0.145, 0.06))
+    k.box("wood_dark", origin, rot, (0, py, 0.38), (W, 1.2, 0.12))
+    for step in range(2):
+        k.box("wood", origin, rot, (dx, py - 0.68 - step * 0.26, 0.31 - step * 0.15), (1.1, 0.28, 0.07))
+        k.box("wood_dark", origin, rot, (dx, py - 0.68 - step * 0.26, 0.15 - step * 0.08), (1.1, 0.24, 0.3 - step * 0.15))
     for x in (-W / 2 + 0.1, W / 2 - 0.1):
-        k.box("wood_dark", origin, rot, (x, -L / 2 - 1.2, 1.15), (0.1, 0.1, 1.4))
-    k.box("roof", origin, rot, (0, -L / 2 - 0.7, 1.95), (W + 0.3, 1.5, 0.07), tilt=("X", 0.22))
-    bench(origin + Matrix.Rotation(rot, 3, "Z") @ Vector((0.9, -L / 2 - 0.55, 0.48)), rot + math.pi)
-    k.box("solar", origin, rot, (-W * 0.2, L / 4 + 0.15, 0.5 + H + 0.75), (1.1, 0.8, 0.04), tilt=("X", -pitch))
+        k.box("wood_dark", origin, rot, (x, py - 0.52, 1.18), (0.1, 0.1, 1.42))
+        k.box("wood", origin, rot, (x, py - 0.35, 1.72), (0.06, 0.42, 0.06), tilt=("X", 0.7))
+        for b_ in range(5):
+            k.box("wood_light", origin, rot, (x, py - 0.4 + b_ * 0.2, 0.75), (0.04, 0.04, 0.5))
+        k.box("wood", origin, rot, (x, py, 1.0), (0.08, 1.1, 0.06))
+    k.box("wood_dark", origin, rot, (0, py - 0.52, 1.9), (W + 0.1, 0.12, 0.12))
+    k.box("roof", origin, rot, (0, py + 0.02, 2.02), (W + 0.3, 1.5, 0.07), tilt=("X", 0.22))
+    for i in range(3):
+        k.box("roof_dark" if i % 2 else "roof", origin, rot, (0, py - 0.5 + i * 0.5, 1.94 + i * 0.11), (W + 0.32, 0.56, 0.04), tilt=("X", 0.22))
+    bench(origin + R @ Vector((0.9, py + 0.1, 0.5)), rot + math.pi)
+
+    # rain barrel under the gutter's downspout
+    bx, by = W / 2 + 0.35, -L / 2 + 0.25
+    k.cyl("metal_dark", origin, rot, (W / 2 + 0.3, -L / 2 - 0.4, top + 0.05), (bx, by, 1.0), 0.04, seg=6)
+    k.cyl("wood", origin, rot, (bx, by, 0.0), (bx, by, 0.8), 0.28, 0.3, seg=12)
+    for z in (0.18, 0.62):
+        k.torus("metal_dark", origin, rot, (bx, by, z), 0.3, 0.02, seg=16, ring=4)
+    k.box("solar", origin, rot, (-W * 0.2, L / 4 + 0.15, top + 0.82), (1.1, 0.8, 0.04), tilt=("X", -pitch))
 
 
 def telescope(origin, rot):
@@ -824,21 +1107,33 @@ LICHEN_PALE = Vector(pw.hex_color("#b9b98f")[:3])
 rock_material = pw.vertex_color_material("rock_detail", roughness=0.95)
 
 
-def chiselled_stone(name, subdivisions=2, squash=(1.15, 0.92, 0.66), cuts=9, tone=0, lichen=0.35, radius=0.5):
+def chiselled_stone(name, subdivisions=2, squash=(1.15, 0.92, 0.66), cuts=9, tone=0, lichen=0.35, radius=0.5, slab=False):
     """A stone with split faces: a dented sphere cut by several random planes, the way rock breaks,
     with a bedded base. Colour goes per face: every plane gets its own shade from the way it
-    faces, hollows and the foot go darker, and faces that look up carry patches of lichen."""
+    faces, hollows and the foot go darker, and faces that look up carry patches of lichen.
+    `slab` starts from a box instead and only chips its edges, for flat stones such as steps."""
     r = random.Random(f"{args.seed}-{name}")
     bm = bmesh.new()
-    pw.add_ico(bm, (0, 0, 0), radius, subdivisions, squash)
+    if slab:
+        cube = bmesh.ops.create_cube(bm, size=2.0 * radius)["verts"]
+        bmesh.ops.scale(bm, vec=Vector(squash), verts=cube)
+        bmesh.ops.subdivide_edges(bm, edges=bm.edges[:], cuts=2, use_grid_fill=True)
+    else:
+        pw.add_ico(bm, (0, 0, 0), radius, subdivisions, squash)
     offset = Vector((r.uniform(0, 40), r.uniform(0, 40), r.uniform(0, 40)))
+    dent = 0.03 if slab else 0.12
     for v in bm.verts:
         u = v.co / radius
-        v.co *= 1.0 + 0.12 * noise.noise(u * 1.2 + offset) + 0.04 * noise.noise(u * 3.2 + offset)
+        v.co *= 1.0 + dent * noise.noise(u * 1.2 + offset) + dent * 0.35 * noise.noise(u * 3.2 + offset)
     for _ in range(cuts):
         normal = Vector((r.uniform(-1, 1), r.uniform(-1, 1), r.uniform(-0.25, 1.0))).normalized()
-        extent = max(abs(normal.x) * squash[0], abs(normal.y) * squash[1], abs(normal.z) * squash[2]) * radius
-        depth = extent * r.uniform(0.45, 0.78)
+        if slab:
+            # a box reaches furthest at a corner, and only those corners and edges get chipped
+            extent = (abs(normal.x) * squash[0] + abs(normal.y) * squash[1] + abs(normal.z) * squash[2]) * radius
+            depth = extent * r.uniform(0.8, 0.93)
+        else:
+            extent = max(abs(normal.x) * squash[0], abs(normal.y) * squash[1], abs(normal.z) * squash[2]) * radius
+            depth = extent * r.uniform(0.45, 0.78)
         for v in bm.verts:
             d = v.co.dot(normal)
             if d > depth:
@@ -882,7 +1177,7 @@ for _ in range(3 * 42 * 3):
 STONE_SHAPES = ((1.25, 0.95, 0.72), (1.45, 1.0, 0.45), (0.95, 0.85, 1.0), (1.3, 0.8, 0.62), (1.1, 1.05, 0.8), (1.5, 0.9, 0.55))
 rock_src = [chiselled_stone(f"pebble_src_{k_}", 2, STONE_SHAPES[k_], 8 + k_ % 4, k_) for k_ in range(6)]
 meadow_src = [chiselled_stone(f"stone_src_{k_}", 1, STONE_SHAPES[k_ * 2], 7, k_ + 1, 0.3) for k_ in range(3)]
-slab_src = [chiselled_stone(f"slab_src_{k_}", 1, (2.2, 0.62, 0.22), 6, k_ + 1, 0.12) for k_ in range(3)]
+slab_src = [chiselled_stone(f"slab_src_{k_}", 1, (1.3, 0.46, 0.11), 8, k_ + 1, 0.12, slab=True) for k_ in range(3)]
 
 # steps on steep stretches, edging stones and way-marks
 
@@ -925,13 +1220,21 @@ for k_, (p, side, z, tangent) in enumerate(rows):
     if grade > 0.24 and k_ % 3 == 0:
         a = Vector((p.x, p.y, z)) + Vector((side.x, side.y, 0)) * (TRAIL_HALF * 0.95)
         b = Vector((p.x, p.y, z)) - Vector((side.x, side.y, 0)) * (TRAIL_HALF * 0.95)
-        # set proud of the tread, which now sits a few centimetres above the ground
+        # each end rests on the ground under it: where the trail crosses a slope, a level step
+        # would bury one end and leave the other sticking out like a fin
+        a.z = surface(a.x, a.y)
+        b.z = surface(b.x, b.y)
         if z < 56:
+            # set proud of the tread, which sits a few centimetres above the ground
             step_kit.cyl("wood", Vector((0, 0, 0)), 0.0, a + Vector((0, 0, 0.07)), b + Vector((0, 0, 0.07)), 0.06, seg=6)
         else:
-            obj = bpy.data.objects.new(f"slab_{k_}", slab_src[k_ % 3])
-            obj.rotation_euler = (0, 0, math.atan2(side.y, side.x) + trail_rng.uniform(-0.08, 0.08))
-            obj.location = (p.x, p.y, z + 0.04)
+            # steps fall on every third row, so the shape follows the step count, not the row
+            obj = bpy.data.objects.new(f"slab_{k_}", slab_src[(k_ // 3) % 3])
+            # tilted across the trail to lie on the slope, level along it like a step
+            cross = -math.atan2(a.z - b.z, (a - b).length)
+            obj.rotation_euler = (0, cross, math.atan2(side.y, side.x) + trail_rng.uniform(-0.08, 0.08))
+            # bedded in the snow, with only the top of the stone showing
+            obj.location = (p.x, p.y, z + 0.005)
             edge_col.objects.link(obj)
     if k_ % 4 == 0:
         s = 1 if (k_ // 4) % 2 else -1
@@ -1472,19 +1775,67 @@ props.cyl("metal", Vector((0, 0, 0)), 0.0, pole_b - Vector((0, 0, 2.0)), pole_b,
 prayer_flags(pole_a, pole_b, 14, 0.4)
 lantern_post(at("camp_5", 1.7, -1.4), r5)
 
-# Ridge: viewing deck with railing, telescope, bench and a panorama board.
+# Ridge: a viewing deck of separate boards on posts with stone footings and cross braces, a
+# railing with two rails, steps, an orientation table, tourist binoculars, a bench, the
+# panorama board and drifts of snow on the uphill side.
 rr = frame_rot("ridge")
 deck = at("ridge", 0, 0)
-props.box("wood_light", deck, rr, (0, 0, 0.12), (4.4, 2.6, 0.16))
-for x in (-2.0, 2.0):
+R_ = Matrix.Rotation(rr, 3, "Z")
+DW, DL, DZ = 4.4, 2.6, 0.24
+for x in (-2.0, 0.0, 2.0):
     for y in (-1.1, 1.1):
-        props.cyl("wood_dark", deck, rr, (x, y, -0.6), (x, y, 0.1), 0.06, seg=6)
-rail = [deck + Matrix.Rotation(rr, 3, "Z") @ Vector((x, 1.25, 0)) for x in (-2.1, -1.05, 0.0, 1.05, 2.1)]
-railing([Vector((p.x, p.y, 0)) for p in rail])
-telescope(deck + Matrix.Rotation(rr, 3, "Z") @ Vector((-1.1, 0.6, 0.2)), rr + math.pi)
-bench(deck + Matrix.Rotation(rr, 3, "Z") @ Vector((0.9, -0.2, 0.2)), rr)
+        props.box("stone", deck, rr, (x, y, -0.15), (0.32, 0.32, 0.3))
+        props.cyl("wood_dark", deck, rr, (x, y, -0.6), (x, y, DZ - 0.08), 0.07, seg=6)
+for y in (-1.1, 1.1):
+    for x0, x1 in ((-2.0, 0.0), (0.0, 2.0)):
+        props.cyl("wood", deck, rr, (x0, y, -0.45), (x1, y, DZ - 0.15), 0.035, seg=4)
+        props.cyl("wood", deck, rr, (x0, y, DZ - 0.15), (x1, y, -0.45), 0.035, seg=4)
+for y in (-DL / 2, DL / 2):
+    props.box("wood_dark", deck, rr, (0, y, DZ - 0.1), (DW + 0.1, 0.1, 0.14))
+for x in (-DW / 2, DW / 2):
+    props.box("wood_dark", deck, rr, (x, 0, DZ - 0.1), (0.1, DL, 0.14))
+for b in range(13):
+    y = -DL / 2 + (b + 0.5) * DL / 13
+    props.box("wood_light" if b % 3 else "wood", deck, rr, (0, y, DZ), (DW, DL / 13 - 0.025, 0.04))
+# Local +Y points up to the summit, so the valley and the drop lie towards -Y: the railing runs
+# along that side and round the ends, and the steps come up from the trail at the back.
+rail_posts = [(x, -DL / 2 + 0.05) for x in (-2.15, -1.08, 0.0, 1.08, 2.15)] + [(side * 2.15, y) for side in (-1, 1) for y in (-0.3, 0.75)]
+for x, y in rail_posts:
+    props.box("wood_dark", deck, rr, (x, y, DZ + 0.5), (0.09, 0.09, 1.0))
+props.box("wood", deck, rr, (0, -DL / 2 + 0.05, DZ + 1.0), (DW + 0.2, 0.12, 0.06))
+props.box("wood", deck, rr, (0, -DL / 2 + 0.05, DZ + 0.55), (DW + 0.1, 0.06, 0.05))
+for side in (-1, 1):
+    props.box("wood", deck, rr, (side * 2.15, -0.2, DZ + 1.0), (0.12, DL - 0.6, 0.06))
+    props.box("wood", deck, rr, (side * 2.15, -0.2, DZ + 0.55), (0.06, DL - 0.6, 0.05))
+for step in range(3):
+    props.box("wood_light", deck, rr, (0.9, DL / 2 + 0.22 + step * 0.26, DZ - 0.12 - step * 0.14), (1.2, 0.26, 0.05))
+    props.box("wood_dark", deck, rr, (0.9, DL / 2 + 0.22 + step * 0.26, DZ - 0.3 - step * 0.14), (1.2, 0.2, 0.3))
+# orientation table: a low stone pedestal with a bronze disc lying almost flat on its top,
+# marked out towards the peaks
+ot = Vector((1.25, -0.4, DZ))
+props.box("stone", deck, rr, tuple(ot + Vector((0, 0, 0.36))), (0.5, 0.5, 0.72))
+props.box("stone_light", deck, rr, tuple(ot + Vector((0, 0, 0.75))), (0.74, 0.74, 0.07))
+disc = deck + R_ @ (ot + Vector((0, 0, 0.82)))
+props.cyl("bronze", disc, rr, (0, 0.012, -0.01), (0, -0.012, 0.035), 0.3, seg=20)
+for i in range(8):
+    a = i / 8 * math.tau
+    props.box("roof_dark", disc, rr + a, (0.15, 0, 0.04), (0.2, 0.014, 0.008))
+props.ico("bronze", disc, rr, (0, 0, 0.05), 0.035)
+# tourist binoculars on a pedestal
+bn = Vector((-0.2, -0.75, DZ))
+props.cyl("metal_dark", deck, rr, tuple(bn), tuple(bn + Vector((0, 0, 1.0))), 0.06, seg=8)
+props.box("fabric_teal", deck, rr, tuple(bn + Vector((0, 0, 1.12))), (0.34, 0.22, 0.18))
+for side in (-1, 1):
+    props.cyl("metal_dark", deck, rr, tuple(bn + Vector((side * 0.08, -0.1, 1.14))), tuple(bn + Vector((side * 0.08, -0.2, 1.14))), 0.05, seg=10)
+    props.cyl("metal_dark", deck, rr, tuple(bn + Vector((side * 0.08, 0.1, 1.15))), tuple(bn + Vector((side * 0.08, 0.17, 1.15))), 0.03, seg=8)
+telescope(deck + R_ @ Vector((-1.4, -0.55, DZ)), rr + math.pi)
+bench(deck + R_ @ Vector((0.2, 0.6, DZ)), rr)
 map_board(at("ridge", 2.9, -1.6), rr + 0.3)
 signpost(at("ridge", -2.8, -1.4), rr, [(math.pi / 2, 1.7), (-math.pi / 2, 1.5)])
+flag_pole(deck + R_ @ Vector((2.15, -DL / 2 + 0.05, DZ + 1.0)), rr, "fabric_blue", 1.6)
+for dx_, dy_, r_ in ((-1.6, 2.2, 0.9), (-0.6, 2.6, 1.1), (2.7, 2.0, 0.8), (-2.9, 0.4, 0.7)):
+    drift = at("ridge", dx_, dy_)
+    props.ico("snow", drift, rr, (0, 0, 0.0), r_, (1.6, 1.0, 0.32), sub=2)
 
 # Summit: observatory with a railing, summit pillar, prayer flags and a dish.
 ox, oy = SITES["summit"]

@@ -2,6 +2,7 @@ import * as THREE from 'three/webgpu';
 import {
   attribute,
   cameraPosition,
+  cross,
   dot,
   float,
   max,
@@ -320,6 +321,7 @@ export class AtlasScene implements WorldScene {
 
     const ridge = at('ridge');
     const summit = at('summit');
+    const uphill = summit.clone().sub(ridge).setY(0).normalize();
     // The last shot looks back down the whole route: the camera ends beyond the summit with
     // the observatory in front of it and the valley behind, so the climb's last move is a
     // slow pull back that keeps the heading of the ridge views instead of turning round.
@@ -330,16 +332,23 @@ export class AtlasScene implements WorldScene {
     const summitView = summitFocus.clone().sub(summitCamera).setY(0).normalize();
     const summitRight = new THREE.Vector3().crossVectors(summitView, up).normalize();
     return [
-      { position: new THREE.Vector3(-78, 112, 262), target: new THREE.Vector3(26, 26, -34), fov: 40 },
+      // the opening shot keeps a band of dawn sky above the far ranges
+      { position: new THREE.Vector3(-78, 112, 262), target: new THREE.Vector3(26, 44, -34), fov: 40 },
       frame('base', 'camp_1', { back: 10.5, side: -6, height: 5.2, panel: -1, fov: 44, shift: 3.6 }),
       frame('camp_1', 'camp_2', { back: 10.5, side: 4.5, height: 4.6, panel: 1, fov: 42, shift: 3.8 }),
       frame('camp_2', 'camp_3', { back: 11.5, side: -5, height: 5.2, panel: -1, fov: 44, shift: 3.8 }),
       frame('camp_3', 'camp_4', { back: 10.5, side: 4.5, height: 4.8, panel: 1, fov: 42, shift: 3.8 }),
       frame('camp_4', 'camp_5', { back: 10.5, side: -4.5, height: 4.8, panel: -1, fov: 42, shift: 3.8 }),
       frame('camp_5', 'ridge', { back: 10.5, side: 4.5, height: 5, panel: 1, fov: 42, shift: 3.8 }),
+      // the viewing deck from behind and above with the valley beyond it, kept in the right
+      // half and clear of the dock, since the project card sits on the left
       {
-        position: lifted(ridge.clone().add(new THREE.Vector3(4, 8, -7)), 4),
-        target: new THREE.Vector3(-24, 18, 70),
+        position: lifted(ridge.clone().addScaledVector(uphill, 7).add(new THREE.Vector3(0, 4.6, 0)), 4),
+        target: ridge
+          .clone()
+          .addScaledVector(uphill, -30)
+          .addScaledVector(new THREE.Vector3().crossVectors(uphill, up), 8)
+          .add(new THREE.Vector3(0, -22, 0)),
         fov: 52,
       },
       {
@@ -359,13 +368,28 @@ export class AtlasScene implements WorldScene {
   private skyNode() {
     const dir = positionWorldDirection;
     const h = dir.y;
-    const above = mix(this.uHorizon, this.uZenith, smoothstep(0.0, 0.62, h).pow(0.75));
+    // orange hugging the horizon, a band of rose above it, then the zenith
+    const rose = mix(this.uHorizon, this.uZenith, 0.4).mul(vec3(1.07, 0.9, 1.0));
+    const lift = mix(this.uHorizon, rose, smoothstep(0.0, 0.16, h));
+    const above = mix(lift, this.uZenith, smoothstep(0.12, 0.72, h).pow(0.8));
     const below = mix(this.uGround, this.uHorizon, smoothstep(-0.22, 0.0, h));
     const base = mix(below, above, smoothstep(-0.005, 0.005, h));
     const sunDot = max(dot(dir, this.uSunDir), 0.0);
+
+    // A thin layer of high cloud on a dome over the valley: the streaks flatten towards the
+    // horizon, glow warm near the low sun and turn rose away from it.
+    const plane = dir.xz.div(max(h, 0.025)).mul(0.6);
+    const drift = vec2(time.mul(0.004), 0);
+    const streaks = mx_noise_float(plane.mul(vec2(0.32, 1.3)).add(drift))
+      .mul(0.62)
+      .add(mx_noise_float(plane.mul(vec2(1.05, 3.4)).add(drift.mul(1.7)).add(5.1)).mul(0.38));
+    const cover = smoothstep(0.12, 0.55, streaks).mul(smoothstep(0.008, 0.07, h)).mul(float(1).sub(smoothstep(0.55, 0.95, h)));
+    const lit = mix(rose.mul(1.28), this.uSun.mul(1.2).add(0.08), sunDot.pow(3));
+    const clouded = mix(base, lit, cover.mul(0.62));
+
     const halo = sunDot.pow(5).mul(0.32).add(sunDot.pow(48).mul(0.6));
     const disk = smoothstep(0.9993, 0.9997, sunDot).mul(9);
-    return base.add(this.uSun.mul(halo.add(disk)));
+    return clouded.add(this.uSun.mul(halo.add(disk)));
   }
 
   /**
@@ -523,39 +547,101 @@ export class AtlasScene implements WorldScene {
     }
   }
 
+  /**
+   * Two kinds of cloud: tall cumulus built from dented puffs, and long flat bands that slip
+   * between the far ranges. Both are shaded by hand from the sky's own colours: the sun's tint
+   * on the faces that turn to it, a cool lavender underneath and a bright edge against the light.
+   */
   private addClouds(): void {
-    const pieces: THREE.BufferGeometry[] = [];
     const random = mulberry32(11);
-    const material = new THREE.MeshStandardNodeMaterial({ color: '#ffffff', roughness: 1, flatShading: true });
-    material.emissiveNode = mix(this.uHorizon, vec3(1, 1, 1), 0.35).mul(0.42);
+    const material = new THREE.MeshBasicNodeMaterial();
+    const view = normalize(cameraPosition.sub(positionWorld));
+    const flat = normalize(cross(positionWorld.dFdx(), positionWorld.dFdy()));
+    const n = flat.mul(dot(flat, view).sign());
+    const sunward = smoothstep(-0.35, 0.9, dot(n, this.uSunDir));
+    const top = smoothstep(-0.25, 0.85, n.y);
+    const shade = mix(this.uZenith, this.uHorizon, 0.45).mul(0.95);
+    const light = mix(vec3(1, 1, 1), this.uSun, 0.42).mul(1.12);
+    const rim = float(1).sub(max(dot(n, view), 0)).pow(3).mul(max(dot(view.negate(), this.uSunDir), 0).mul(0.6).add(0.15));
+    material.colorNode = mix(shade, light, sunward.mul(0.72).add(top.mul(0.28))).add(this.uSun.mul(rim.mul(0.3)));
+    material.fog = true;
+    this.bag.add(material);
+
+    const puff = (r: number, x: number, y: number, z: number, seed: number, squash = 0.72) => {
+      const g = new THREE.IcosahedronGeometry(r, 2);
+      const position = g.getAttribute('position');
+      const p = new THREE.Vector3();
+      for (let i = 0; i < position.count; i++) {
+        p.fromBufferAttribute(position, i);
+        const bump = Math.sin(p.x * 1.7 + seed) * Math.sin(p.y * 2.1 + seed * 1.3) * Math.sin(p.z * 1.9 + seed * 0.7);
+        p.multiplyScalar(1 + 0.13 * bump);
+        position.setXYZ(i, p.x, p.y * squash, p.z * 0.9);
+      }
+      g.translate(x, y, z);
+      return g;
+    };
+
     this.clouds = new THREE.Group();
-    for (let c = 0; c < 16; c++) {
+    const pieces: THREE.BufferGeometry[] = [];
+    const build = (stratus: boolean) => {
       pieces.length = 0;
-      const puffs = 6 + Math.floor(random() * 6);
-      for (let i = 0; i < puffs; i++) {
-        const centre = 1 - Math.abs(i / (puffs - 1) - 0.5) * 2;
-        const r = 2.4 + random() * 2.5 + centre * 3;
-        const g = new THREE.IcosahedronGeometry(r, 1);
-        g.scale(1, 0.7, 0.9);
-        g.translate((i - puffs / 2) * 3.4 + random() * 1.6, centre * 1.8 + random() * 1.2, random() * 5 - 2.5);
-        pieces.push(g);
+      if (stratus) {
+        const count = 7 + Math.floor(random() * 5);
+        for (let i = 0; i < count; i++) {
+          const g = puff(2.2 + random() * 1.8, (i - count / 2) * 4.2 + random() * 2, random() * 0.8, random() * 2.5 - 1.25, random() * 9, 0.38);
+          g.scale(1.6, 1, 1);
+          pieces.push(g);
+        }
+      } else {
+        const count = 8 + Math.floor(random() * 8);
+        for (let i = 0; i < count; i++) {
+          const centre = 1 - Math.abs(i / (count - 1) - 0.5) * 2;
+          const r = 2.2 + random() * 2.4 + centre * 3.2;
+          pieces.push(puff(r, (i - count / 2) * 3.1 + random() * 1.6, centre * 2.2 + random() * 1.4, random() * 5 - 2.5, random() * 9));
+          // a second, smaller tier on the middle puffs gives the cumulus its towers
+          if (centre > 0.45 && random() < 0.7) {
+            pieces.push(puff(r * 0.62, (i - count / 2) * 3.1 + random() * 1.2, centre * 2.2 + r * 0.75, random() * 3 - 1.5, random() * 9));
+          }
+        }
       }
       const merged = mergeGeometries(pieces);
       pieces.forEach((g) => g.dispose());
-      if (!merged) continue;
+      if (!merged) return null;
       const position = merged.getAttribute('position');
       for (let i = 0; i < position.count; i++) {
         if (position.getY(i) < 0) position.setY(i, position.getY(i) * 0.2);
       }
-      merged.computeVertexNormals();
-      this.bag.add(merged);
-      const cloud = new THREE.Mesh(merged, material);
-      const angle = random() * Math.PI * 2;
-      const radius = 90 + random() * 210;
-      cloud.position.set(Math.cos(angle) * radius + 20, 96 + random() * 60, Math.sin(angle) * radius - 40);
+      return this.bag.add(merged);
+    };
+
+    // keep the middle of the opening shot clear, where the summit and the route sit
+    const opening = new THREE.Vector3(-78, 112, 262);
+    const openingView = new THREE.Vector3(26, 44, -34).sub(opening).normalize();
+    const blocksOpening = (p: THREE.Vector3) => p.clone().sub(opening).normalize().dot(openingView) > Math.cos(THREE.MathUtils.degToRad(17));
+    for (let c = 0; c < 18; c++) {
+      const geometry = build(false);
+      if (!geometry) continue;
+      const cloud = new THREE.Mesh(geometry, material);
+      do {
+        const angle = random() * Math.PI * 2;
+        const radius = 90 + random() * 210;
+        cloud.position.set(Math.cos(angle) * radius + 20, 96 + random() * 60, Math.sin(angle) * radius - 40);
+      } while (blocksOpening(cloud.position));
       cloud.scale.setScalar(0.8 + random() * 1.1);
       cloud.userData['speed'] = 0.6 + random() * 0.8;
       this.clouds.add(cloud);
+    }
+    for (let c = 0; c < 9; c++) {
+      const geometry = build(true);
+      if (!geometry) continue;
+      const band = new THREE.Mesh(geometry, material);
+      const angle = random() * Math.PI * 2;
+      const radius = 330 + random() * 160;
+      band.position.set(Math.cos(angle) * radius + 20, 58 + random() * 40, Math.sin(angle) * radius - 40);
+      band.rotation.y = -angle + Math.PI / 2;
+      band.scale.setScalar(1.4 + random() * 1.2);
+      band.userData['speed'] = 0.25 + random() * 0.3;
+      this.clouds.add(band);
     }
     this.scene.add(this.clouds);
   }

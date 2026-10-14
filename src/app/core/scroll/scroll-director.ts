@@ -17,7 +17,10 @@ export interface ScrollDirectorOptions {
 
 const clamp01 = (v: number) => Math.min(1, Math.max(0, v));
 const smootherstep = (t: number) => t * t * t * (t * (t * 6 - 15) + 10);
-const easeInOutCubic = (t: number) => (t < 0.5 ? 4 * t * t * t : 1 - (-2 * t + 2) ** 3 / 2);
+const easeInOutSine = (t: number) => -(Math.cos(Math.PI * t) - 1) / 2;
+
+/** Seconds for one step between neighbouring anchors; longer jumps take a little longer. */
+const STEP_DURATION = 2.8;
 
 /** Wheel events closer together than this belong to the same gesture (trackpad inertia). */
 const GESTURE_GAP = 220;
@@ -91,6 +94,9 @@ export class ScrollDirector {
     let i = 0;
     while (i < n - 2 && y > stops[i + 1]) i++;
     const local = (y - stops[i]) / Math.max(1, stops[i + 1] - stops[i]);
+    // a stepped page always comes to rest on an anchor and its travel is already eased, so the
+    // camera follows the whole travel instead of rushing through the middle of it
+    if (this.options.stepped) return i + local;
     const hold = this.options.hold ?? 0.22;
     return i + smootherstep(clamp01((local - hold) / (1 - 2 * hold)));
   }
@@ -173,6 +179,7 @@ export class ScrollDirector {
   private travel(index: number): void {
     const target = this.stops[index];
     if (target === undefined) return;
+    const steps = Math.max(1, Math.abs(index - this.nearest()));
     window.clearTimeout(this.settleTimer);
     this.travelling = true;
     const done = () => {
@@ -180,7 +187,8 @@ export class ScrollDirector {
       this.answeredUntil = Math.max(this.answeredUntil, performance.now() + 120);
     };
     if (this.lenis) {
-      this.lenis.scrollTo(target, { duration: 1.8, easing: easeInOutCubic, lock: true, force: true, onComplete: done });
+      const duration = Math.min(5, STEP_DURATION + 0.5 * (steps - 1));
+      this.lenis.scrollTo(target, { duration, easing: easeInOutSine, lock: true, force: true, onComplete: done });
     } else {
       window.scrollTo({ top: target });
       requestAnimationFrame(done);
