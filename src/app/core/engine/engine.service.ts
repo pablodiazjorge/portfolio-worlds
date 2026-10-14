@@ -194,7 +194,10 @@ export class Engine {
       renderer,
       backend,
       quality,
-      reducedMotion: prefersReducedMotion(),
+      // live, so a scene that snaps between stops and a page that slides never disagree
+      get reducedMotion() {
+        return prefersReducedMotion();
+      },
       touch: isTouchDevice(),
     };
     renderer.setAnimationLoop(this.tick);

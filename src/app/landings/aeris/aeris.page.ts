@@ -1,5 +1,4 @@
 import { ChangeDetectionStrategy, Component, ElementRef, inject } from '@angular/core';
-import { prefersReducedMotion } from '../../core/engine/device';
 import { injectWorldScene } from '../../core/engine/inject-world-scene';
 import { CardCrossfade } from '../../core/scroll/card-crossfade';
 import { Reveal } from '../../core/scroll/reveal.directive';
@@ -27,10 +26,9 @@ export class AerisPage {
   private readonly cards = new CardCrossfade(inject(ElementRef<HTMLElement>).nativeElement as HTMLElement);
 
   constructor() {
-    const still = prefersReducedMotion();
     injectFrameLoop(() => {
       const director = this.director();
-      if (director && !still) this.cards.update(director);
+      if (director?.smooth) this.cards.update(director);
     });
   }
 

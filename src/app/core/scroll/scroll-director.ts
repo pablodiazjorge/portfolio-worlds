@@ -36,6 +36,8 @@ const SWIPE_THRESHOLD = 36;
  */
 export class ScrollDirector {
   private readonly lenis: Lenis | null;
+  /** Whether the page slides between stops; when it jumps, scenes cut to the stop with it. */
+  readonly smooth: boolean;
   private readonly observer: ResizeObserver;
   private stops: number[] = [];
   private maxScroll = 1;
@@ -50,8 +52,10 @@ export class ScrollDirector {
   private settleTimer = 0;
 
   constructor(private readonly options: ScrollDirectorOptions) {
+    this.smooth = options.smooth;
     this.lenis = options.smooth
-      ? new Lenis({ autoRaf: true, lerp: 0.085, wheelMultiplier: 0.85, touchMultiplier: 1.4 })
+      ? // the motion stays on everywhere (see prefersReducedMotion), Lenis included
+        new Lenis({ autoRaf: true, lerp: 0.085, wheelMultiplier: 0.85, touchMultiplier: 1.4, respectReducedMotion: false })
       : null;
     this.free = options.anchors.flatMap((el, i): [number, number][] =>
       el.hasAttribute('data-free') && i + 1 < options.anchors.length ? [[i, i + 1]] : [],

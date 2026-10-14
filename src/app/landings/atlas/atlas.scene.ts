@@ -35,6 +35,8 @@ import { CameraKey, KeyframeRig, PointerTracker } from '../../core/scroll/camera
 import { HeightField } from '../../core/scroll/height-field';
 
 export interface ScrollSource {
+  /** Whether the page slides between stops; when it jumps, the camera cuts with it. */
+  readonly smooth: boolean;
   keyframe(): number;
   nearest(): number;
 }
@@ -710,8 +712,10 @@ export class AtlasScene implements WorldScene {
     if (!rig) return;
     const source = this.scroll;
     const reduced = this.ctx.reducedMotion;
-    const k = source ? (reduced ? source.nearest() : source.keyframe()) : 0;
-    rig.update(k, dt, reduced, this.pointer?.value ?? null);
+    // a page that jumps between stops gets a cut to the stop in the same frame
+    const cut = source ? !source.smooth : reduced;
+    const k = source ? (cut ? source.nearest() : source.keyframe()) : 0;
+    rig.update(k, dt, cut, this.pointer?.value ?? null);
 
     const t = rig.position / (rig.count - 1);
     this.applySky(t);

@@ -4,8 +4,14 @@ interface NavigatorWithMemory extends Navigator {
   readonly deviceMemory?: number;
 }
 
+/**
+ * Whether the worlds should hold still. The motion is the content here, so by the owner's
+ * decision it stays on whatever the system's reduced-motion setting says. Everything that
+ * would honour the setting (the director's `smooth`, the scenes cutting to a stop with the
+ * page) is in place behind this one switch should that decision change.
+ */
 export function prefersReducedMotion(): boolean {
-  return typeof matchMedia === 'function' && matchMedia('(prefers-reduced-motion: reduce)').matches;
+  return false;
 }
 
 export function isTouchDevice(): boolean {

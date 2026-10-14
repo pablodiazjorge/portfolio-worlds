@@ -315,8 +315,10 @@ export class TerraScene implements WorldScene {
     if (!rig) return;
     const reduced = this.ctx.reducedMotion;
     const source = this.scroll;
-    const k = source ? (reduced ? source.nearest() : source.keyframe()) : 0;
-    rig.update(k, dt, reduced, this.pointer?.value ?? null);
+    // a page that jumps between stops gets a cut to the stop in the same frame
+    const cut = source ? !source.smooth : reduced;
+    const k = source ? (cut ? source.nearest() : source.keyframe()) : 0;
+    rig.update(k, dt, cut, this.pointer?.value ?? null);
     const s = rig.position;
 
     STAGES.forEach((_, i) => {

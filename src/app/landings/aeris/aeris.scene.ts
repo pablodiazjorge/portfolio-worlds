@@ -482,20 +482,22 @@ export class AerisScene implements WorldScene {
     if (!rig) return;
     const reduced = this.ctx.reducedMotion;
     const source = this.scroll;
-    const k = source ? (reduced ? source.nearest() : source.keyframe()) : 0;
-    rig.update(k, dt, reduced, this.pointer?.value ?? null);
+    // a page that jumps between stops gets a cut to the stop in the same frame
+    const cut = source ? !source.smooth : reduced;
+    const k = source ? (cut ? source.nearest() : source.keyframe()) : 0;
+    rig.update(k, dt, cut, this.pointer?.value ?? null);
     const step = Math.min(dt, 1 / 30);
 
-    this.flyDrone(k, step, elapsed, reduced);
+    this.flyDrone(k, step, elapsed, reduced, cut);
     this.swingChain(step, elapsed, reduced);
     this.blinkScreen(elapsed, reduced);
   }
 
-  private flyDrone(k: number, dt: number, elapsed: number, reduced: boolean): void {
+  private flyDrone(k: number, dt: number, elapsed: number, reduced: boolean, cut: boolean): void {
     const goal = this.flightGoalAt(k, this.flightGoal);
     const drone = this.drone;
     const pos = this.flightPos;
-    if (reduced) {
+    if (cut) {
       pos.copy(goal);
       this.velocity.set(0, 0, 0);
     } else {

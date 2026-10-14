@@ -1,5 +1,4 @@
 import { ChangeDetectionStrategy, Component, computed, ElementRef, inject, signal, viewChild } from '@angular/core';
-import { prefersReducedMotion } from '../../core/engine/device';
 import { injectWorldScene } from '../../core/engine/inject-world-scene';
 import { CardCrossfade } from '../../core/scroll/card-crossfade';
 import { Reveal } from '../../core/scroll/reveal.directive';
@@ -46,12 +45,11 @@ export class AtlasPage {
 
   constructor() {
     let last = -1;
-    const still = prefersReducedMotion();
     injectFrameLoop(() => {
       const director = this.director();
       const gauge = this.altimeter()?.nativeElement;
       if (!director || !gauge) return;
-      if (!still) this.cards.update(director);
+      if (director.smooth) this.cards.update(director);
       const k = director.keyframe();
       gauge.style.setProperty('--k', String(k / (director.count - 1)));
       const nearest = director.nearest();
