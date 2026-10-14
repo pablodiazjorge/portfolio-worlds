@@ -49,6 +49,7 @@ def material(name, color, roughness=0.8, metallic=0.0, emission=None, emission_s
     bsdf.inputs["Base Color"].default_value = hex_color(color) if isinstance(color, str) else color
     bsdf.inputs["Roughness"].default_value = roughness
     bsdf.inputs["Metallic"].default_value = metallic
+    mat.diffuse_color = bsdf.inputs["Base Color"].default_value  # so solid and workbench views show the colour
     if emission:
         bsdf.inputs["Emission Color"].default_value = hex_color(emission)
         bsdf.inputs["Emission Strength"].default_value = emission_strength
@@ -71,6 +72,7 @@ def vertex_color_material(name, roughness=0.9):
     attr = nodes.new("ShaderNodeVertexColor")
     attr.layer_name = "Col"
     mat.node_tree.links.new(attr.outputs["Color"], bsdf.inputs["Base Color"])
+    mat.diffuse_color = (0.86, 0.9, 1.0, 1.0)  # a pale stand-in for solid and workbench views
     return mat
 
 

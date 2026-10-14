@@ -65,7 +65,7 @@ const ASSETS = [
     name: 'atrium-museum',
     script: 'atrium_museum.py',
     out: 'public/models/atrium/museum.glb',
-    budgetKB: 900,
+    budgetKB: 4000,
     keepNodes: true,
   },
   {
