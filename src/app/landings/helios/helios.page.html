@@ -1,0 +1,120 @@
+@let t = site.t();
+@let x = t.helios;
+@let p = site.portfolio();
+<article class="helios">
+  <section class="hero" data-anchor aria-labelledby="helios-name">
+    <div class="hero-inner">
+      <h1 id="helios-name" class="hero-name">{{ p.name }}</h1>
+      <p class="hero-role">{{ p.role }}</p>
+      <p class="hero-focus">{{ p.focus }}</p>
+      <p class="hero-intro">{{ p.intro }}</p>
+      <button type="button" class="cta" (click)="goTo(1)">{{ x.start }}</button>
+    </div>
+  </section>
+
+  <section class="stage stage-right" data-anchor aria-labelledby="helios-about">
+    <div class="stage-inner">
+      <div class="panel" pwReveal>
+        <h2 id="helios-about">{{ t.sections.about }}</h2>
+        @for (paragraph of p.about; track $index) {
+          <p class="prose">{{ paragraph }}</p>
+        }
+        <p class="meta">{{ p.location }}</p>
+      </div>
+    </div>
+  </section>
+
+  <h2 class="sr-only">{{ t.sections.experience }}</h2>
+  @for (job of route(); track job.id; let i = $index) {
+    <section class="stage" [class.stage-left]="i % 2 === 0" [class.stage-right]="i % 2 === 1" data-anchor>
+      <div class="stage-inner">
+        <article class="panel" pwReveal>
+          <p class="waypoint">
+            <span>{{ x.waypoint }} {{ i + 1 }}</span>
+            <span class="waypoint-year">{{ job.startYear }}</span>
+          </p>
+          <h3>{{ job.role }}</h3>
+          <p class="org">
+            <a [href]="job.companyUrl" target="_blank" rel="noopener noreferrer">{{ job.company }}<span class="sr-only"> {{ t.opensNewTab }}</span></a>
+            <span>{{ job.period }}</span>
+          </p>
+          <p class="meta">{{ job.contract }}</p>
+          <p class="prose">{{ job.summary }}</p>
+          <ul class="tags" [attr.aria-label]="t.common.stack">
+            @for (tech of job.tech; track tech) {
+              <li>{{ tech }}</li>
+            }
+          </ul>
+        </article>
+      </div>
+    </section>
+  }
+
+  <section class="projects" aria-labelledby="helios-projects">
+    <header class="projects-head" data-anchor>
+      <div class="panel panel-wide" pwReveal>
+        <h2 id="helios-projects">{{ t.sections.projects }}</h2>
+        <p class="prose">{{ x.projectsLead }}</p>
+      </div>
+    </header>
+    <ul class="grid">
+      @for (project of p.projects; track project.slug) {
+        <li class="module" pwReveal>
+          <img [src]="project.cover" alt="" width="960" height="540" loading="lazy" decoding="async" />
+          <div class="module-body">
+            <h3>{{ project.title }}</h3>
+            @if (project.year) {
+              <p class="module-year">{{ project.year }}</p>
+            }
+            <p class="prose">{{ project.tagline }}</p>
+            <details>
+              <summary>{{ t.common.more }}</summary>
+              <p class="prose">{{ project.description }}</p>
+              <ul class="tags" [attr.aria-label]="t.common.stack">
+                @for (tech of project.tech; track tech) {
+                  <li>{{ tech }}</li>
+                }
+              </ul>
+            </details>
+            <p class="module-links">
+              <a [href]="project.repo" target="_blank" rel="noopener noreferrer">{{ t.common.code }}<span class="sr-only">: {{ project.title }} {{ t.opensNewTab }}</span></a>
+              @if (project.demo) {
+                <a [href]="project.demo" target="_blank" rel="noopener noreferrer">{{ t.common.demo }}<span class="sr-only">: {{ project.title }} {{ t.opensNewTab }}</span></a>
+              }
+            </p>
+          </div>
+        </li>
+      }
+    </ul>
+    <div class="projects-end" data-anchor aria-hidden="true"></div>
+  </section>
+
+  <section class="stage stage-left contact" data-anchor aria-labelledby="helios-contact">
+    <div class="stage-inner">
+      <div class="panel" pwReveal>
+        <h2 id="helios-contact">{{ t.sections.contact }}</h2>
+        <p class="prose">{{ x.contactLead }}</p>
+        <ul class="contact-links">
+          <li><a [href]="p.contact.linkedin" target="_blank" rel="noopener noreferrer">{{ t.common.linkedin }}<span class="sr-only"> {{ t.opensNewTab }}</span></a></li>
+          <li><a [href]="p.contact.github" target="_blank" rel="noopener noreferrer">{{ t.common.github }}<span class="sr-only"> {{ t.opensNewTab }}</span></a></li>
+          <li><a [href]="p.contact.cv" target="_blank" rel="noopener">{{ t.common.cv }}<span class="sr-only"> {{ t.opensNewTab }}</span></a></li>
+          <li><a [href]="site.classicUrl()" rel="noopener">{{ t.common.classic }}</a></li>
+        </ul>
+        <p class="meta">{{ t.common.builtWith }}</p>
+      </div>
+    </div>
+  </section>
+</article>
+
+<aside class="telemetry" [attr.aria-label]="x.telemetry">
+  <dl>
+    <div>
+      <dt>{{ x.altitude }}</dt>
+      <dd><span #altitude>0</span> {{ x.km }}</dd>
+    </div>
+    <div>
+      <dt>{{ x.distance }}</dt>
+      <dd><span #distance>0</span> {{ x.km }}</dd>
+    </div>
+  </dl>
+</aside>
