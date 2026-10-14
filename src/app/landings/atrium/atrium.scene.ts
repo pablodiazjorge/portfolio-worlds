@@ -1,5 +1,5 @@
 import * as THREE from 'three/webgpu';
-import { abs, color, float, fract, max, min, mix, mx_noise_float, normalWorld, positionLocal, positionWorld, reflector, smoothstep, texture, time, uv, vec2 } from 'three/tsl';
+import { abs, color, float, fract, max, min, mix, mx_noise_float, normalWorld, pmremTexture, positionLocal, positionWorld, reflector, smoothstep, texture, time, uv, vec2 } from 'three/tsl';
 import { drawLandscape, drawPainting, drawStainedGlass } from './stained-glass';
 import { RoomEnvironment } from 'three/addons/environments/RoomEnvironment.js';
 import { dequantizeMeshes } from '../../core/assets/dequantize';
@@ -84,6 +84,7 @@ export class AtriumScene implements WorldScene {
   private readonly clickables: THREE.Mesh[] = [];
   private readonly panels = new Map<string, PanelTexture>();
   private face: PanelTexture | null = null;
+  private envTexture: THREE.Texture | null = null;
   private blinkAt = 3;
   private eyesOpen = true;
   private copy: MuseumCopy;
@@ -198,6 +199,7 @@ export class AtriumScene implements WorldScene {
       (mesh.material as THREE.Material | undefined)?.dispose();
     });
     this.scene.environment = target.texture;
+    this.envTexture = target.texture;
     this.scene.environmentIntensity = 0.5;
   }
 
@@ -270,7 +272,10 @@ export class AtriumScene implements WorldScene {
     lib.set('case_glass', caseGlass);
 
     // polished marble with the inlay: red bands on a diamond grid and a border along the walls
-    const floor = std('floor', { roughness: 0.14 });
+    const floor = std('floor', { roughness: 0.16 });
+    // the studio environment map washes the polished floor white at grazing angles, and a material cannot
+    // scale the scene environment on its own, so the floor samples it through a node of its own, dimmed
+    if (this.envTexture) floor.envNode = pmremTexture(this.envTexture).mul(0.12);
     const veins = smoothstep(0.48, 0.92, mx_noise_float(positionWorld.mul(vec2(0.9, 0.35).xyx)).mul(0.5).add(0.5));
     const floorTex = texture(marbleMap, p.div(2.4).add(vec2(0.13, 0.41))).rgb;
     const base = floorTex.mul(mix(color('#e9dfcb'), color('#cbbda5'), veins.mul(0.6)));
@@ -296,7 +301,8 @@ export class AtriumScene implements WorldScene {
       mirror.target.position.y = 0.002;
       this.scene.add(mirror.target);
       this.bag.defer(() => mirror.dispose());
-      floor.colorNode = mix(stoneFloor, mirror.rgb.mul(0.9), mix(float(0.3), float(0.06), inlay));
+      // the mirrored windows are far brighter than white, so the reflection is capped before it is mixed in
+      floor.colorNode = mix(stoneFloor, min(mirror.rgb.mul(0.9), float(1.1)), mix(float(0.3), float(0.06), inlay));
     }
 
     const loader = new THREE.TextureLoader();
@@ -478,7 +484,8 @@ export class AtriumScene implements WorldScene {
       const glow = new THREE.Mesh(geometry, material);
       glow.scale.set(featured ? 6.4 : 3.4, featured ? 4.2 : 2.9, 1);
       glow.position.copy(exhibit.focus).addScaledVector(normal, 0.04);
-      glow.position.y = light.position.y - glow.scale.y / 2 + 0.2;
+      // the cone opens from the underside of the lamp hood, 0.18 m under the light point
+      glow.position.y = light.position.y - 0.18 - glow.scale.y / 2;
       glow.lookAt(glow.position.clone().add(normal));
       glow.renderOrder = 2;
       this.scene.add(glow);
