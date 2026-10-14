@@ -341,6 +341,8 @@ M = {
     "bronze": pw.material("bronze", "#a8834e", 0.45, 0.6),
     "solar": pw.material("solar", "#1d2f55", 0.3, 0.4),
     "white": pw.material("white_paint", "#eeeef0", 0.5),
+    "plaster": pw.material("plaster", "#ddd6cb", 0.85),
+    "glass": pw.material("glass", "#3a4a61", 0.25),
     "sign": pw.material("sign_yellow", "#f3c22f", 0.6),
     "marker_red": pw.material("marker_red", "#d23b2f", 0.6),
     "snow": pw.material("snow_block", "#e6eaf1", 0.8),
@@ -354,6 +356,7 @@ M = {
     "ember": pw.material("ember", "#ff7a2a", 1.0, emission="#ff6a1a", emission_strength=4.0),
     "lantern": pw.material("lantern_glass", "#ffe2a8", 1.0, emission="#ffcf7a", emission_strength=5.0),
     "window": pw.material("window_warm", "#ffd9a0", 1.0, emission="#ffc777", emission_strength=3.0),
+    "window_soft": pw.material("window_soft", "#e9b97c", 1.0, emission="#ffb766", emission_strength=1.1),
     "beacon": pw.material("beacon", "#ff5a4a", 1.0, emission="#ff4a3a", emission_strength=8.0),
     "trail": pw.vertex_color_material("trail", roughness=1.0),
     "flower_white": pw.material("flower_white", "#f4f1ea", 0.8),
@@ -1837,50 +1840,529 @@ for dx_, dy_, r_ in ((-1.6, 2.2, 0.9), (-0.6, 2.6, 1.1), (2.7, 2.0, 0.8), (-2.9,
     drift = at("ridge", dx_, dy_)
     props.ico("snow", drift, rr, (0, 0, 0.0), r_, (1.6, 1.0, 0.32), sub=2)
 
-# Summit: observatory with a railing, summit pillar, prayer flags and a dish.
+# Summit: an observatory on a stone plinth. The last camera rests beyond the summit looking back
+# at it, 34 degrees round from the ridge line, so the open slit with the telescope inside, the
+# ladder and the front of the control building all turn towards it.
 ox, oy = SITES["summit"]
 oz = surface(ox, oy)
-observatory = Kit("observatory")
 o = Vector((ox, oy, oz))
-observatory.cyl("observatory", o, 0.0, (0, 0, -0.6), (0, 0, 1.9), 2.3, seg=24)
-observatory.box("stone", o, 0.0, (0, 0, -0.35), (5.4, 5.4, 0.5))
-bm = bmesh.new()
-bmesh.ops.create_uvsphere(bm, u_segments=28, v_segments=14, radius=2.45)
-bmesh.ops.delete(bm, geom=[v for v in bm.verts if v.co.z < -0.01], context="VERTS")
-bmesh.ops.translate(bm, verts=bm.verts[:], vec=Vector((ox, oy, oz + 1.9)))
-pw.bm_object("observatory_dome", bm, M["observatory"], smooth=True)
-slit_rot = math.atan2(-(oy - SITES["ridge"][1]), -(ox - SITES["ridge"][0]))
-for k in range(6):
-    a = 0.1 + k * 0.25
-    c = Vector((ox, oy, oz + 1.9)) + Matrix.Rotation(slit_rot, 3, "Z") @ Vector((math.cos(a) * 2.37, 0, math.sin(a) * 2.37))
-    observatory.box("dark", c, slit_rot, (0, 0, 0), (0.12, 0.62, 0.5))
-door_rot = slit_rot + math.pi * 0.85
-observatory.box("window", o, door_rot, (2.28, 0, 0.55), (0.18, 0.75, 1.15))
-observatory.box("metal_dark", o, door_rot, (2.3, 0, 1.18), (0.2, 0.95, 0.08))
-for k in range(4):
-    observatory.box("stone_light", o, door_rot, (2.7 + k * 0.3, 0, -0.45 + k * 0.12), (0.3, 1.0, 0.12))
-for a in range(0, 360, 30):
-    rad = math.radians(a)
-    if abs(((a - math.degrees(door_rot)) + 180) % 360 - 180) < 25:
-        continue
-    observatory.cyl("metal", o, 0.0, (math.cos(rad) * 2.85, math.sin(rad) * 2.85, -0.1), (math.cos(rad) * 2.85, math.sin(rad) * 2.85, 0.85), 0.03, seg=5)
-observatory.torus("metal", o, 0.0, (0, 0, 0.85), 2.85, 0.025, seg=48, ring=4)
-observatory.finish()
-bm = bmesh.new()
-pw.add_cone(bm, (ox - 2.8, oy + 1.2, oz - 0.3), 0.06, 0.03, 4.2, segments=5)
-pw.bm_object("antenna", bm, M["metal"])
+fr = frame_rot("summit")
+FR = Matrix.Rotation(fr, 3, "Z")
+CAM = math.radians(124.0)  # azimuth of the last camera in summit-local space
+obs = Kit("observatory")
+
+
+def here(p):
+    """World point from summit-local coordinates."""
+    return o + FR @ Vector(p)
+
+
+def polar(az, r, z=0.0):
+    return Vector((math.cos(az) * r, math.sin(az) * r, z))
+
+
+def part(mat, points, faces, kit=obs):
+    """Raw summit-local geometry: points and faces as index tuples."""
+    bm = kit.bm(mat)
+    vs = [bm.verts.new(Vector(p)) for p in points]
+    for f in faces:
+        bm.faces.new([vs[i] for i in f])
+    Kit._place(bm, vs, o, fr)
+
+
+def quads(mat, polys, facing):
+    """Loose faces, each wound so its normal agrees with facing(centre)."""
+    points, faces, index = [], [], {}
+
+    def corner(p):
+        key = tuple(round(c, 5) for c in p)
+        if key not in index:
+            index[key] = len(points)
+            points.append(p)
+        return index[key]
+
+    for poly in polys:
+        poly = [Vector(p) for p in poly]
+        centre = sum(poly, Vector()) / len(poly)
+        normal = (poly[1] - poly[0]).cross(poly[-1] - poly[0])
+        if normal.dot(facing(centre)) < 0:
+            poly.reverse()
+        face = []
+        for p in poly:
+            i = corner(p)
+            if i not in face:
+                face.append(i)
+        if len(face) >= 3:
+            faces.append(tuple(face))
+    part(mat, points, faces)
+
+
+def open_cylinder(mat, centre, r, z0, z1, seg):
+    pts = [Vector((centre[0] + math.cos(s / seg * math.tau) * r, centre[1] + math.sin(s / seg * math.tau) * r, z)) for z in (z0, z1) for s in range(seg)]
+    part(mat, pts, [(s, (s + 1) % seg, seg + (s + 1) % seg, seg + s) for s in range(seg)])
+
+
+def disc(mat, centre, r, z, seg):
+    pts = [Vector((centre[0], centre[1], z))] + [Vector((centre[0] + math.cos(s / seg * math.tau) * r, centre[1] + math.sin(s / seg * math.tau) * r, z)) for s in range(seg)]
+    part(mat, pts, [(0, 1 + s, 1 + (s + 1) % seg) for s in range(seg)])
+
+
+def polyline_tube(mat, pts, radius, sides=4, closed=False, kit=obs):
+    """A thin tube through summit-local points: rails, wires and lattice members."""
+    pts = [Vector(p) for p in pts]
+    n = len(pts)
+    rings = []
+    for k in range(n):
+        prev = pts[k - 1] if closed else pts[max(k - 1, 0)]
+        nxt = pts[(k + 1) % n] if closed else pts[min(k + 1, n - 1)]
+        t = (nxt - prev).normalized()
+        ref = Vector((0, 0, 1)) if abs(t.z) < 0.9 else Vector((1, 0, 0))
+        a = t.cross(ref).normalized()
+        b = t.cross(a).normalized()
+        rings.append([pts[k] + (a * math.cos(s / sides * math.tau) + b * math.sin(s / sides * math.tau)) * radius for s in range(sides)])
+    faces = []
+    for k in range(n if closed else n - 1):
+        k2 = (k + 1) % n
+        for s in range(sides):
+            s2 = (s + 1) % sides
+            faces.append((k * sides + s, k * sides + s2, k2 * sides + s2, k2 * sides + s))
+    part(mat, [p for ring in rings for p in ring], faces, kit)
+
+
+def slit_dome(centre, R, az, half, reach, rows=9, front=16, back=10, wall=0.1, seams=True, lining=(6, 12, 6)):
+    """A hemisphere split by a shutter slit `2 * half` wide that rises from the horizon at
+    azimuth `az`, crosses the top and ends `reach` radians beyond it, with the upper shutter
+    rolled back over the rear. It is built in the slit's own coordinates, so the slit edges are
+    true arcs: beta leans out of the slit's plane and alpha runs from the front horizon over the
+    top to the back."""
+    c = Vector(centre)
+    turn = Matrix.Rotation(az, 3, "Z")
+    b0 = math.asin(half / R)
+    a_end = math.pi / 2 + reach
+
+    def at_(r, beta, alpha):
+        return c + turn @ Vector((r * math.cos(beta) * math.cos(alpha), r * math.sin(beta), r * math.cos(beta) * math.sin(alpha)))
+
+    def shell(r, mat, outward, rows_, front_, back_):
+        side = [b0 + (math.pi / 2 - b0) * i / rows_ for i in range(rows_ + 1)]
+        betas = [-b for b in reversed(side)] + [0.0] + side
+        alphas = [a_end * i / front_ for i in range(front_ + 1)] + [a_end + (math.pi - a_end) * i / back_ for i in range(1, back_ + 1)]
+        pts, index = [], {}
+        for j, beta in enumerate(betas):
+            for i, alpha in enumerate(alphas):
+                if abs(abs(beta) - math.pi / 2) < 1e-6:
+                    key = ("pole", beta > 0)
+                    if key not in index:
+                        index[key] = len(pts)
+                        pts.append(at_(r, beta, 0.0))
+                    index[(j, i)] = index[key]
+                else:
+                    index[(j, i)] = len(pts)
+                    pts.append(at_(r, beta, alpha))
+        faces = []
+        for j in range(len(betas) - 1):
+            in_band = betas[j] >= -b0 - 1e-6 and betas[j + 1] <= b0 + 1e-6
+            for i in range(len(alphas) - 1):
+                if in_band and alphas[i + 1] <= a_end + 1e-6:
+                    continue  # the open slit
+                ring = []
+                for q in (index[(j, i)], index[(j, i + 1)], index[(j + 1, i + 1)], index[(j + 1, i)]):
+                    if q not in ring:
+                        ring.append(q)
+                if len(ring) < 3:
+                    continue
+                mid = sum((pts[q] for q in ring), Vector()) / len(ring)
+                normal = (pts[ring[1]] - pts[ring[0]]).cross(pts[ring[-1]] - pts[ring[0]])
+                if (normal.dot(mid - c) > 0) != outward:
+                    ring.reverse()
+                faces.append(tuple(ring))
+        part(mat, pts, faces)
+
+    shell(R, "observatory", True, rows, front, back)
+    shell(R - wall, "dark", False, *lining)
+
+    # the cut edges of the shell and the end of the slit
+    fronts = [a_end * i / front for i in range(front + 1)]
+    jambs = []
+    for sign in (-1, 1):
+        for a0, a1 in zip(fronts, fronts[1:]):
+            jambs.append([at_(R, sign * b0, a0), at_(R, sign * b0, a1), at_(R - wall, sign * b0, a1), at_(R - wall, sign * b0, a0)])
+    quads("metal", jambs, lambda p: turn @ Vector((0, -math.copysign(1.0, (turn.transposed() @ (p - c)).y), 0)))
+    ends = [[at_(R, b_a, a_end), at_(R, b_b, a_end), at_(R - wall, b_b, a_end), at_(R - wall, b_a, a_end)] for b_a, b_b in ((-b0, 0.0), (0.0, b0))]
+    quads("metal", ends, lambda p: turn @ Vector((math.sin(a_end), 0, -math.cos(a_end))))
+
+    # shutter rails either side of the slit, from the front horizon round to the back
+    rail_alphas = [math.pi * i / 22 for i in range(23)]
+    h, d = 0.055, 0.035 / R
+    rails = []
+    for sign in (-1, 1):
+        beta = sign * (b0 + 0.075 / R)
+        for a0, a1 in zip(rail_alphas, rail_alphas[1:]):
+            for (r0, b_0), (r1, b_1) in (((R, beta - d), (R + h, beta - d)), ((R + h, beta - d), (R + h, beta + d)), ((R + h, beta + d), (R, beta + d))):
+                rails.append([at_(r0, b_0, a0), at_(r0, b_0, a1), at_(r1, b_1, a1), at_(r1, b_1, a0)])
+    def rail_facing(p):
+        q = turn.transposed() @ (p - c)
+        beta = math.asin(max(-1.0, min(1.0, q.y / q.length)))
+        centre = math.copysign(b0 + 0.075 / R, q.y)
+        return (p - c).normalized() + turn @ Vector((0, math.copysign(1.0, beta - centre), 0))
+
+    quads("metal_dark", rails, rail_facing)
+
+    # the upper shutter rolled back over the rear, and the lower windscreen half raised
+    s_alphas = [a_end + 0.04 + (min(math.pi - 0.12, a_end + 1.0) - a_end - 0.04) * i / 10 for i in range(11)]
+    bs = b0 + 0.035 / R
+    shutter = []
+    for a0, a1 in zip(s_alphas, s_alphas[1:]):
+        shutter.append([at_(R + 0.05, -bs, a0), at_(R + 0.05, -bs, a1), at_(R + 0.05, bs, a1), at_(R + 0.05, bs, a0)])
+        for sign in (-1, 1):
+            shutter.append([at_(R + 0.005, sign * bs, a0), at_(R + 0.005, sign * bs, a1), at_(R + 0.05, sign * bs, a1), at_(R + 0.05, sign * bs, a0)])
+    for a_ in (s_alphas[0], s_alphas[-1]):
+        shutter.append([at_(R + 0.005, -bs, a_), at_(R + 0.05, -bs, a_), at_(R + 0.05, bs, a_), at_(R + 0.005, bs, a_)])
+    shutter_mid = at_(R + 0.03, 0.0, (s_alphas[0] + s_alphas[-1]) / 2)
+    quads("white", shutter, lambda p: (p - c).normalized() * 0.4 + (p - shutter_mid).normalized())
+    screen = [[at_(R - wall * 0.5, -b0, a0), at_(R - wall * 0.5, -b0, a1), at_(R - wall * 0.5, b0, a1), at_(R - wall * 0.5, b0, a0)] for a0, a1 in ((0.0, 0.16), (0.16, 0.32))]
+    quads("white", screen, lambda p: p - c)
+
+    if not seams:
+        return
+
+    # panel seams: three rings and sixteen ribs, broken where the slit and its rails run
+    def clear(e, phi):
+        x, y, z = math.cos(e) * math.cos(phi - az), math.cos(e) * math.sin(phi - az), math.sin(e)
+        return not (abs(y) * R < half + 0.13 and math.atan2(z, x) <= a_end + 0.06)
+
+    def on_dome(e, phi, r=R + 0.012):
+        return c + Vector((r * math.cos(e) * math.cos(phi), r * math.cos(e) * math.sin(phi), r * math.sin(e)))
+
+    strips = []
+    w = 0.028 / R
+    for e in (0.5, 1.0):
+        steps = 56
+        for s in range(steps):
+            p0, p1 = s / steps * math.tau, (s + 1) / steps * math.tau
+            if clear(e, p0) and clear(e, p1):
+                strips.append([on_dome(e - w, p0), on_dome(e - w, p1), on_dome(e + w, p1), on_dome(e + w, p0)])
+    for k in range(12):
+        phi = az + (k + 0.5) / 12 * math.tau
+        es = [0.03 + 1.36 * i / 9 for i in range(10)]
+        for e0, e1 in zip(es, es[1:]):
+            if clear(e0, phi) and clear(e1, phi):
+                dp0, dp1 = w / math.cos(e0), w / math.cos(e1)
+                strips.append([on_dome(e0, phi - dp0), on_dome(e1, phi - dp1), on_dome(e1, phi + dp1), on_dome(e0, phi + dp0)])
+    quads("metal", strips, lambda p: p - c)
+
+
+def railing_posts(points, z0, z1):
+    for p in points:
+        obs.cyl("metal", o, fr, (p.x, p.y, z0), (p.x, p.y, z1), 0.028, seg=5)
+
+
+# plinth: a coursed stone octagon, deep enough to sit on the crest wherever the ground falls away
+obs.cyl("stone", o, fr, (0, 0, -1.4), (0, 0, 0.06), 3.2, seg=16)
+obs.cyl("stone_light", o, fr, (0, 0, 0.06), (0, 0, 0.25), 3.26, seg=16)
+obs.cyl("stone_light", o, fr, (0, 0, -0.62), (0, 0, -0.52), 3.24, seg=16)
+
+# drum, rotating skirt and dome
+FLOOR, BASE, R_DOME = 2.92, 3.1, 2.35
+SLIT = CAM + math.radians(28.0)
+open_cylinder("observatory", (0, 0), 2.2, 0.25, BASE, 40)
+obs.cyl("metal_dark", o, fr, (0, 0, 1.52), (0, 0, 1.6), 2.225, seg=40)
+for s in range(16):
+    a = SLIT + (s + 0.5) / 16 * math.tau
+    obs.box("metal", o, fr + a, (2.208, 0, 1.0), (0.025, 0.045, 1.5))
+    obs.box("metal", o, fr + a, (2.208, 0, 2.3), (0.025, 0.045, 1.35))
+obs.cyl("metal_dark", o, fr, (0, 0, BASE - 0.13), (0, 0, BASE + 0.12), R_DOME + 0.04, seg=48)
+for s in range(24):
+    a = s / 24 * math.tau
+    obs.box("metal", o, fr + a, (R_DOME + 0.05, 0, BASE - 0.13), (0.06, 0.08, 0.05))
+slit_dome((0, 0, BASE), R_DOME, SLIT, 0.55, 0.3)
+disc("wood_dark", (0, 0), 2.19, FLOOR + 0.005, 24)
+
+# the telescope on its fork, aimed out of the slit
+el = math.radians(50.0)
+tube_dir = Vector((math.cos(el) * math.cos(SLIT), math.cos(el) * math.sin(SLIT), math.sin(el)))
+tube_up = Vector((-math.sin(el) * math.cos(SLIT), -math.sin(el) * math.sin(SLIT), math.cos(el)))
+pivot = Vector((0, 0, 3.85))
+obs.cyl("metal_dark", o, fr, (0, 0, FLOOR), (0, 0, 3.32), 0.3, 0.24, seg=12)
+obs.box("white", o, fr + SLIT, (0, 0, 3.37), (0.42, 1.0, 0.1))
+for side in (-1, 1):
+    obs.box("white", o, fr + SLIT, (0, side * 0.43, 3.62), (0.3, 0.1, 0.52))
+obs.cyl("white", o, fr, pivot - tube_dir * 0.95, pivot + tube_dir * 1.4, 0.3, seg=16)
+obs.cyl("metal_dark", o, fr, pivot + tube_dir * 1.4, pivot + tube_dir * 1.56, 0.33, seg=16)
+obs.cyl("metal_dark", o, fr, pivot - tube_dir * 1.08, pivot - tube_dir * 0.95, 0.24, seg=12)
+obs.cyl("metal_dark", o, fr, pivot - tube_dir * 0.18, pivot + tube_dir * 0.16, 0.32, seg=16)
+obs.cyl("metal", o, fr, pivot + tube_up * 0.4 - tube_dir * 0.1, pivot + tube_up * 0.4 + tube_dir * 0.75, 0.06, seg=8)
+
+# drum windows facing the last camera
+for a in (CAM - math.radians(22.0), CAM + math.radians(10.0)):
+    obs.box("glass", o, fr + a, (2.21, 0, 2.05), (0.04, 0.46, 0.62))
+    for dz in (-0.34, 0.34):
+        obs.box("metal_dark", o, fr + a, (2.23, 0, 2.05 + dz), (0.06, 0.56, 0.06))
+    for dy in (-0.26, 0.26):
+        obs.box("metal_dark", o, fr + a, (2.23, dy, 2.05), (0.06, 0.06, 0.74))
+    obs.box("stone_light", o, fr + a, (2.27, 0, 1.68), (0.16, 0.62, 0.06))
+    obs.box("snow", o, fr + a, (2.27, 0, 1.73), (0.13, 0.56, 0.04))
+
+# control building: walls, a stone footing and a roof terrace level with the catwalk
+ANNEX = CAM + math.radians(100.0)
+AR = fr + ANNEX
+AF = Matrix.Rotation(ANNEX, 3, "Z")
+
+
+SIDE = -1.0  # turns the front (+v in these plans) towards the last camera
+
+
+def annex(p):
+    """Summit-local point from control-building coordinates (u out from the dome, v to its front)."""
+    return AF @ Vector((p[0], SIDE * p[1], p[2]))
+
+
+def block(mat, u0, u1, v0, v1, z0, z1):
+    v0, v1 = sorted((SIDE * v0, SIDE * v1))
+    obs.box(mat, o, AR, ((u0 + u1) / 2, (v0 + v1) / 2, (z0 + z1) / 2), (u1 - u0, v1 - v0, z1 - z0))
+
+
+WALL_V, WALL_U, TERRACE = 1.75, 5.4, FLOOR - 0.01
+block("stone", 1.3, WALL_U + 0.15, -WALL_V - 0.12, WALL_V + 0.12, -1.6, 0.25)
+block("plaster", 1.3, WALL_U, -WALL_V, WALL_V, 0.25, TERRACE - 0.09)
+block("stone", 1.3, WALL_U + 0.04, -WALL_V - 0.04, WALL_V + 0.04, 0.25, 0.72)
+block("stone_light", 1.3, WALL_U + 0.2, -1.95, 1.95, TERRACE - 0.09, TERRACE)
+# quoins: long and short blocks alternating up both outer corners
+for v in (-1, 1):
+    for k in range(4):
+        z0 = 0.76 + k * 0.48
+        side_len, end_len = (0.44, 0.26) if k % 2 == 0 else (0.26, 0.44)
+        lo, hi = (WALL_V - 0.02, WALL_V + 0.05) if v > 0 else (-WALL_V - 0.05, -WALL_V + 0.02)
+        block("stone_light", WALL_U - side_len, WALL_U + 0.05, lo, hi, z0, z0 + 0.42)
+        e0, e1 = (WALL_V - end_len, WALL_V + 0.05) if v > 0 else (-WALL_V - 0.05, -WALL_V + end_len)
+        block("stone_light", WALL_U - 0.02, WALL_U + 0.05, e0, e1, z0, z0 + 0.42)
+
+def facade(mat, face, a0, a1, out0, out1, z0, z1):
+    """A box on one face of the control building: along the wall, out from it and up."""
+    axis, sign, plane = face
+    p0, p1 = sorted((plane + sign * out0, plane + sign * out1))
+    if axis == "v":
+        block(mat, a0, a1, p0, p1, z0, z1)
+    else:
+        block(mat, p0, p1, a0, a1, z0, z1)
+
+
+FRONT, BACK, END = ("v", 1, WALL_V), ("v", -1, -WALL_V), ("u", 1, WALL_U)
+
+
+def window(face, a, z0, w=0.78, h=0.86, mat="glass"):
+    z1 = z0 + h
+    facade(mat, face, a - w / 2, a + w / 2, -0.01, 0.015, z0, z1)
+    for b0, b1 in ((a - w / 2 - 0.07, a - w / 2), (a + w / 2, a + w / 2 + 0.07)):
+        facade("wood_dark", face, b0, b1, 0.0, 0.07, z0 - 0.07, z1 + 0.07)
+    facade("wood_dark", face, a - w / 2, a + w / 2, 0.0, 0.07, z1, z1 + 0.07)
+    facade("wood_dark", face, a - 0.025, a + 0.025, 0.0, 0.045, z0, z1)
+    facade("wood_dark", face, a - w / 2, a + w / 2, 0.0, 0.045, z0 + h * 0.62, z0 + h * 0.62 + 0.045)
+    facade("stone_light", face, a - w / 2 - 0.13, a + w / 2 + 0.13, 0.0, 0.17, z0 - 0.14, z0 - 0.07)
+    facade("snow", face, a - w / 2 - 0.08, a + w / 2 + 0.08, 0.01, 0.16, z0 - 0.07, z0 - 0.03)
+
+
+# the door with its canopy, lamp and steps on the front
+DOOR = 2.85
+facade("wood_dark", FRONT, DOOR - 0.46, DOOR + 0.46, -0.01, 0.04, 0.27, 2.3)
+for b0, b1 in ((DOOR - 0.54, DOOR - 0.46), (DOOR + 0.46, DOOR + 0.54)):
+    facade("metal_dark", FRONT, b0, b1, 0.0, 0.08, 0.25, 2.38)
+facade("metal_dark", FRONT, DOOR - 0.54, DOOR + 0.54, 0.0, 0.08, 2.3, 2.38)
+facade("window_soft", FRONT, DOOR - 0.17, DOOR + 0.17, 0.04, 0.05, 1.55, 2.0)
+for z in (0.7, 1.25):
+    facade("metal_dark", FRONT, DOOR - 0.4, DOOR + 0.4, 0.04, 0.06, z, z + 0.04)
+facade("metal", FRONT, DOOR + 0.3, DOOR + 0.38, 0.04, 0.1, 1.18, 1.22)
+facade("metal_dark", FRONT, DOOR - 0.8, DOOR + 0.8, 0.0, 0.95, 2.52, 2.58)
+facade("snow", FRONT, DOOR - 0.75, DOOR + 0.75, 0.03, 0.9, 2.58, 2.66)
+for b in (DOOR - 0.7, DOOR + 0.7):
+    p_wall = annex((b, WALL_V, 2.1))
+    p_edge = annex((b, WALL_V + 0.88, 2.52))
+    obs.cyl("metal_dark", o, fr, p_wall, p_edge, 0.025, seg=5)
+facade("metal_dark", FRONT, DOOR + 0.66, DOOR + 0.78, 0.0, 0.05, 2.0, 2.16)
+facade("lantern", FRONT, DOOR + 0.67, DOOR + 0.77, 0.05, 0.15, 1.9, 2.04)
+facade("metal_dark", FRONT, DOOR + 0.66, DOOR + 0.78, 0.04, 0.16, 2.04, 2.07)
+facade("stone_light", FRONT, DOOR - 0.68, DOOR + 0.68, 0.0, 0.62, -0.5, 0.12)
+facade("stone_light", FRONT, DOOR - 0.62, DOOR + 0.62, 0.0, 0.34, 0.12, 0.25)
+facade("snow", FRONT, DOOR + 0.2, DOOR + 0.66, 0.36, 0.6, 0.12, 0.17)
+
+window(FRONT, 4.25, 1.15, mat="window_soft")
+window(BACK, 3.4, 1.15)
+window(BACK, 4.4, 1.15)
+window(END, 0.45, 1.15)
+facade("metal_dark", END, -1.15, -0.5, 0.0, 0.05, 1.5, 1.9)
+for k in range(5):
+    facade("metal", END, -1.12, -0.53, 0.05, 0.08, 1.54 + k * 0.075, 1.57 + k * 0.075)
+
+# catwalk round the dome, joined to the terrace, with one railing round both
+GAP = math.asin(1.88 / 2.95)
+cw0, cw1 = ANNEX + GAP - 0.03, ANNEX + math.tau - GAP + 0.03
+steps = 44
+ring_pts, faces = [], []
+for s in range(steps + 1):
+    a = cw0 + (cw1 - cw0) * s / steps
+    for r, z in ((2.2, FLOOR), (3.0, FLOOR), (3.0, FLOOR - 0.09), (2.2, FLOOR - 0.09)):
+        ring_pts.append(polar(a, r, z))
+for s in range(steps):
+    i, j = s * 4, (s + 1) * 4
+    faces += [(i, i + 1, j + 1, j), (i + 1, i + 2, j + 2, j + 1), (i + 2, i + 3, j + 3, j + 2)]
+faces += [(3, 2, 1, 0), (steps * 4, steps * 4 + 1, steps * 4 + 2, steps * 4 + 3)]
+part("metal_dark", ring_pts, faces)
+for s in range(12):
+    a = cw0 + (cw1 - cw0) * (s + 0.5) / 12
+    obs.cyl("metal_dark", o, fr, polar(a, 2.2, FLOOR - 0.75), polar(a, 2.85, FLOOR - 0.09), 0.03, seg=4)
+
+arc = [polar(cw0 + (cw1 - cw0) * s / 40 + 0.03 - 0.06 * s / 40, 2.95) for s in range(41)]
+loop = arc + [annex((WALL_U + 0.12, -1.88, 0)), annex((WALL_U + 0.12, 1.88, 0))]
+for z in (FLOOR + 0.5, FLOOR + 0.98):
+    polyline_tube("metal", [Vector((p.x, p.y, z)) for p in loop], 0.022, sides=4, closed=True)
+railing_posts(arc[::4], FLOOR, FLOOR + 1.0)
+for u in (2.9, 3.8, 4.7):
+    railing_posts([annex((u, 1.88, 0)), annex((u, -1.88, 0))], FLOOR, FLOOR + 1.0)
+railing_posts([annex((WALL_U + 0.12, v, 0)) for v in (-1.88, -0.6, 0.6, 1.88)], FLOOR, FLOOR + 1.0)
+
+# a ladder up to the catwalk on the camera's side
+LADDER = CAM - math.radians(35.0)
+for side in (-0.24, 0.24):
+    p = polar(LADDER, 3.1) + polar(LADDER + math.pi / 2, side)
+    obs.cyl("metal", o, fr, (p.x, p.y, 0.0), (p.x, p.y, FLOOR + 1.0), 0.025, seg=5)
+for k in range(9):
+    z = 0.32 + k * 0.31
+    obs.box("metal", o, fr + LADDER, (3.1, 0, z), (0.035, 0.48, 0.035))
+obs.box("metal_dark", o, fr + LADDER, (3.06, 0, FLOOR - 0.04), (0.14, 0.58, 0.07))
+
+# second, smaller dome on the terrace
+small = annex((4.45, 0.35, 0))
+open_cylinder("observatory", (small.x, small.y), 0.78, TERRACE, TERRACE + 0.55, 24)
+obs.cyl("metal_dark", o, fr, (small.x, small.y, TERRACE + 0.5), (small.x, small.y, TERRACE + 0.6), 0.84, seg=28)
+slit_dome((small.x, small.y, TERRACE + 0.56), 0.82, CAM + math.radians(8.0), 0.16, 0.2, rows=6, front=10, back=6, wall=0.06, seams=False, lining=(4, 8, 4))
+
+# weather station: anemometer, vane, radiation shield and a sensor box on a mast
+mast = annex((3.45, 1.32, 0))
+TOP = TERRACE + 2.35
+obs.cyl("metal", o, fr, (mast.x, mast.y, TERRACE), (mast.x, mast.y, TOP), 0.035, seg=6)
+arm = annex((0.5, 0, 0)) - annex((0, 0, 0))
+obs.cyl("metal", o, fr, (mast.x - arm.x, mast.y - arm.y, TOP - 0.15), (mast.x + arm.x, mast.y + arm.y, TOP - 0.15), 0.02, seg=4)
+cups = Vector((mast.x + arm.x, mast.y + arm.y, TOP - 0.15))
+obs.cyl("metal", o, fr, cups, cups + Vector((0, 0, 0.22)), 0.012, seg=4)
+for k in range(3):
+    a = k / 3 * math.tau
+    tip = cups + Vector((math.cos(a) * 0.18, math.sin(a) * 0.18, 0.2))
+    obs.cyl("metal", o, fr, cups + Vector((0, 0, 0.2)), tip, 0.008, seg=3)
+    obs.ico("metal_dark", o, fr, tip, 0.045, (1.0, 1.0, 0.8), sub=1)
+vane = Vector((mast.x - arm.x, mast.y - arm.y, TOP - 0.15))
+obs.cyl("metal", o, fr, vane, vane + Vector((0, 0, 0.2)), 0.012, seg=4)
+v_dir = 0.6
+obs.box("metal_dark", o, fr + v_dir, (*(Matrix.Rotation(-v_dir, 3, "Z") @ vane)[:2], vane.z + 0.22), (0.5, 0.025, 0.025))
+obs.box("metal_dark", o, fr + v_dir, (*(Matrix.Rotation(-v_dir, 3, "Z") @ vane + Vector((-0.24, 0, 0)))[:2], vane.z + 0.25), (0.1, 0.01, 0.16))
+for k in range(5):
+    obs.cyl("white", o, fr, (mast.x, mast.y, TERRACE + 1.4 + k * 0.05), (mast.x, mast.y, TERRACE + 1.42 + k * 0.05), 0.12 - k * 0.008, seg=10)
+obs.box("white", o, AR, (*(AF.transposed() @ Vector((mast.x, mast.y, 0)) + Vector((0, 0.12, 0)))[:2], TERRACE + 0.95), (0.18, 0.12, 0.26))
+obs.box("solar", o, AR, (*(AF.transposed() @ Vector((mast.x, mast.y, 0)) + Vector((0, -0.2, 0)))[:2], TERRACE + 1.85), (0.36, 0.03, 0.28), tilt=("X", 0.5))
+
+# solar panels along the back of the terrace and a vent pipe
+for u in (3.95, 4.85):
+    block("metal_dark", u - 0.03, u + 0.03, -1.45, -1.39, TERRACE, TERRACE + 0.35)
+    obs.box("solar", o, AR, (u, SIDE * -1.3, TERRACE + 0.42), (0.82, 0.55, 0.03), tilt=("X", SIDE * 0.55))
+vent = annex((5.1, 1.45, 0))
+obs.cyl("metal", o, fr, (vent.x, vent.y, TERRACE), (vent.x, vent.y, TERRACE + 0.7), 0.07, seg=8)
+obs.cyl("metal", o, fr, (vent.x, vent.y, TERRACE + 0.72), (vent.x, vent.y, TERRACE + 0.84), 0.15, 0.02, seg=8)
+
+# lattice mast with the beacon at the far corner, guyed to the terrace
+foot = annex((2.72, -1.45, 0))
+MAST_TOP = TERRACE + 4.2
+legs = []
+for k in range(3):
+    a = ANNEX + k / 3 * math.tau
+    legs.append([Vector((foot.x + math.cos(a) * rr, foot.y + math.sin(a) * rr, z)) for rr, z in ((0.22, TERRACE), (0.08, MAST_TOP))])
+for leg in legs:
+    polyline_tube("metal", leg, 0.022, sides=4)
+levels = 5
+for lv in range(levels + 1):
+    t = lv / levels
+    ring = [leg[0].lerp(leg[1], t) for leg in legs]
+    if lv > 0:
+        polyline_tube("metal", ring, 0.01, sides=3, closed=True)
+    if lv < levels:
+        t2 = (lv + 1) / levels
+        nxt = [leg[0].lerp(leg[1], t2) for leg in legs]
+        for k in range(3):
+            polyline_tube("metal", [ring[k], nxt[(k + 1) % 3]], 0.008, sides=3)
+for z, k in ((MAST_TOP - 1.4, 0), (MAST_TOP - 0.8, 1)):
+    t = (z - TERRACE) / (MAST_TOP - TERRACE)
+    p = legs[k][0].lerp(legs[k][1], t)
+    out = (p - Vector((foot.x, foot.y, p.z))).normalized()
+    obs.box("white", o, fr + math.atan2(out.y, out.x), (*(Matrix.Rotation(-math.atan2(out.y, out.x), 3, "Z") @ (p + out * 0.06))[:2], z), (0.06, 0.22, 0.5))
+for target in (annex((4.9, -1.9, 0)), annex((4.6, 1.9, 0)), annex((2.3, 1.9, 0))):
+    polyline_tube("rope", [Vector((foot.x, foot.y, MAST_TOP - 1.0)), Vector((target.x, target.y, TERRACE + 0.02))], 0.006, sides=3)
 bm = bmesh.new()
 pw.add_ico(bm, (0, 0, 0), 0.12, 1)
 beacon = pw.bm_object("beacon", bm, M["beacon"])
-beacon.location = (ox - 2.8, oy + 1.2, oz + 3.95)
-pillar = at("summit", -4.6, -1.2)
+beacon.location = tuple(here((foot.x, foot.y, MAST_TOP + 0.1)))
+obs.cyl("metal_dark", o, fr, (foot.x, foot.y, MAST_TOP - 0.05), (foot.x, foot.y, MAST_TOP + 0.02), 0.09, seg=8)
+
+# snow on the terrace and against the walls
+block("snow", 2.45, 4.0, 0.55, 1.7, TERRACE, TERRACE + 0.06)
+block("snow", WALL_U - 0.4, WALL_U - 0.05, -0.2, 1.1, TERRACE, TERRACE + 0.05)
+for u_, v_, r_ in ((WALL_U + 0.35, 0.6, 0.75), (4.1, 2.15, 0.6), (3.1, -2.2, 0.7), (WALL_U + 0.3, -1.3, 0.55)):
+    obs.ico("snow", o, fr, annex((u_, v_, 0.0)), r_, (1.7, 1.0, 0.36), sub=1)
+for a, r_ in ((CAM - 0.95, 0.85), (CAM + 0.15, 0.6), (CAM + math.pi + 0.9, 0.8), (CAM - 1.6, 0.7)):
+    obs.ico("snow", o, fr, polar(a, 3.35, 0.02), r_, (1.6, 1.0, 0.35), sub=1)
+
+# Everything but the white shell is shaded flat in the browser, which ignores the normals, so
+# exporting it smooth only lets the faces share their corners and keeps the file small.
+obs.finish(smooth=tuple(obs.meshes))
+
+# around the summit: a trig pillar, a dish, the summit cairn and prayer flags off the catwalk
+pillar = at("summit", *polar(math.radians(62.0), 5.4).xy)
 props.box("white", pillar, 0.0, (0, 0, 0.55), (0.4, 0.4, 1.1))
 props.cyl("metal", pillar, 0.0, (0, 0, 1.1), (0, 0, 1.16), 0.12, seg=10)
-dish = at("summit", 3.6, 2.8)
-props.cyl("metal_dark", dish, 0.0, (0, 0, 0), (0, 0, 1.3), 0.05, seg=6)
-props.dome("white", dish, 0.0, (0, 0, 1.25), 0.55, squash=0.35, seg=12)
-flags_a = at("summit", -3.4, 2.6) + Vector((0, 0, 0.3))
-prayer_flags(Vector((ox, oy, oz + 4.1)), flags_a, 12, 0.6)
+props.box("bronze", pillar, 0.0, (0, 0.205, 0.75), (0.2, 0.01, 0.14))
+
+dish_at = polar(math.radians(36.0), 4.9)
+ground = surface(*here(dish_at).xy) - oz
+obs_dish = Kit("observatory_dish")
+dish_az, dish_el = math.radians(36.0) + 0.4, math.radians(32.0)
+axis = Vector((math.cos(dish_el) * math.cos(dish_az), math.cos(dish_el) * math.sin(dish_az), math.sin(dish_el)))
+d_u = axis.cross(Vector((0, 0, 1))).normalized()
+d_v = d_u.cross(axis).normalized()
+hub = Vector((dish_at.x, dish_at.y, ground + 1.35))
+obs_dish.cyl("metal_dark", o, fr, (dish_at.x, dish_at.y, ground - 0.2), (dish_at.x, dish_at.y, ground + 1.2), 0.06, seg=8)
+obs_dish.cyl("metal_dark", o, fr, (dish_at.x, dish_at.y, ground + 1.2), hub - axis * 0.05, 0.05, seg=6)
+D_R, D_DEPTH = 0.62, 0.16
+rings = [[hub + axis * (0.06 + D_DEPTH * (k / 4) ** 2) + (d_u * math.cos(s / 16 * math.tau) + d_v * math.sin(s / 16 * math.tau)) * D_R * k / 4 for s in range(16)] for k in range(1, 5)]
+front_pts = [hub + axis * 0.06] + [p for ring in rings for p in ring]
+front_faces = [(0, 1 + (s + 1) % 16, 1 + s) for s in range(16)]
+for k in range(3):
+    for s in range(16):
+        a_, b_ = 1 + k * 16 + s, 1 + k * 16 + (s + 1) % 16
+        front_faces.append((a_, b_, b_ + 16, a_ + 16)[::-1])
+bm = obs_dish.bm("white")
+vs = [bm.verts.new(p) for p in front_pts]
+for f in front_faces:
+    face = bm.faces.new([vs[i] for i in f])
+    face.normal_update()
+    if face.normal.dot(axis) < 0:
+        face.normal_flip()
+back_tip = bm.verts.new(hub - axis * 0.06)
+for s in range(16):
+    face = bm.faces.new((vs[49 + s], vs[49 + (s + 1) % 16], back_tip))
+    face.normal_update()
+    if face.normal.dot(axis) > 0:
+        face.normal_flip()
+Kit._place(bm, vs + [back_tip], o, fr)
+focus = hub + axis * (0.06 + D_R ** 2 / (4 * D_DEPTH) * 0.62)
+for s in range(3):
+    rim = rings[-1][s * 16 // 3]
+    obs_dish.cyl("metal", o, fr, rim, focus, 0.012, seg=3)
+obs_dish.cyl("metal_dark", o, fr, focus - axis * 0.08, focus + axis * 0.05, 0.06, seg=8)
+obs_dish.finish(smooth=tuple(obs_dish.meshes))
+
+cairn(at("summit", *polar(math.radians(300.0), 5.6).xy), 0.0, 1.1)
+flag_pole(at("summit", *polar(math.radians(300.0), 5.6).xy) + Vector((0, 0, 1.05)), fr, "fabric_blue", 1.4)
+flags_a = here(polar(CAM + math.radians(30.0), 2.95, FLOOR + 1.0))
+flags_post = at("summit", *polar(CAM + math.radians(62.0), 7.4).xy)
+props.cyl("metal", flags_post, 0.0, (0, 0, -0.2), (0, 0, 2.0), 0.03, seg=6)
+prayer_flags(flags_a, flags_post + Vector((0, 0, 1.95)), 12, 0.45)
 
 props.finish(smooth=("fabric_blue",))
 
