@@ -1,0 +1,127 @@
+@let t = site.t();
+@let a = t.atlas;
+@let p = site.portfolio();
+<article class="atlas">
+  <section class="hero" data-anchor aria-labelledby="atlas-name">
+    <div class="hero-inner">
+      <h1 id="atlas-name" class="hero-name">{{ p.name }}</h1>
+      <p class="hero-role">{{ p.role }}</p>
+      <p class="hero-focus">{{ p.focus }}</p>
+      <p class="hero-intro">{{ p.intro }}</p>
+      <button type="button" class="sign sign-button" (click)="goTo(1)">
+        <span>{{ a.start }}</span>
+      </button>
+    </div>
+  </section>
+
+  <section class="stage stage-right" data-anchor aria-labelledby="atlas-about">
+    <div class="stage-inner">
+      <div class="panel" pwReveal>
+        <p class="sign"><span>{{ a.baseCamp }}</span></p>
+        <h2 id="atlas-about">{{ t.sections.about }}</h2>
+        @for (paragraph of p.about; track $index) {
+          <p class="prose">{{ paragraph }}</p>
+        }
+        <p class="meta">{{ p.location }}</p>
+      </div>
+    </div>
+  </section>
+
+  <h2 class="sr-only">{{ t.sections.experience }}</h2>
+  @for (job of climb(); track job.id; let i = $index) {
+    <section class="stage" [class.stage-left]="i % 2 === 0" [class.stage-right]="i % 2 === 1" data-anchor>
+      <div class="stage-inner">
+        <article class="panel" pwReveal>
+          <p class="sign">
+            <span>{{ a.camp }} {{ i + 1 }}</span>
+            <span class="sign-time">{{ job.startYear }}</span>
+          </p>
+          <h3>{{ job.role }}</h3>
+          <p class="org">
+            <a [href]="job.companyUrl" target="_blank" rel="noopener noreferrer">{{ job.company }}<span class="sr-only"> {{ t.opensNewTab }}</span></a>
+            <span class="period">{{ job.period }}</span>
+          </p>
+          <p class="meta">{{ job.contract }}</p>
+          <p class="prose">{{ job.summary }}</p>
+          <ul class="chips" [attr.aria-label]="t.common.stack">
+            @for (tech of job.tech; track tech) {
+              <li>{{ tech }}</li>
+            }
+          </ul>
+        </article>
+      </div>
+    </section>
+  }
+
+  <section class="projects" aria-labelledby="atlas-projects">
+    <header class="projects-head" data-anchor>
+      <div class="panel panel-wide" pwReveal>
+        <p class="sign"><span>{{ a.ridge }}</span></p>
+        <h2 id="atlas-projects">{{ t.sections.projects }}</h2>
+        <p class="prose">{{ a.projectsLead }}</p>
+      </div>
+    </header>
+    <ol class="project-list">
+      @for (project of p.projects; track project.slug) {
+        <li class="project" pwReveal>
+          <img class="project-cover" [src]="project.cover" alt="" width="960" height="540" loading="lazy" decoding="async" />
+          <div class="project-body">
+            <h3>
+              {{ project.title }}
+              @if (project.year) {
+                <span class="project-year">{{ project.year }}</span>
+              }
+            </h3>
+            <p class="prose">{{ project.tagline }}</p>
+            <details>
+              <summary>{{ t.common.more }}</summary>
+              <p class="prose">{{ project.description }}</p>
+              <ul class="chips" [attr.aria-label]="t.common.stack">
+                @for (tech of project.tech; track tech) {
+                  <li>{{ tech }}</li>
+                }
+              </ul>
+            </details>
+            <p class="links">
+              <a [href]="project.repo" target="_blank" rel="noopener noreferrer">{{ t.common.code }}<span class="sr-only">: {{ project.title }} {{ t.opensNewTab }}</span></a>
+              @if (project.demo) {
+                <a [href]="project.demo" target="_blank" rel="noopener noreferrer">{{ t.common.demo }}<span class="sr-only">: {{ project.title }} {{ t.opensNewTab }}</span></a>
+              }
+            </p>
+          </div>
+        </li>
+      }
+    </ol>
+    <div class="projects-end" data-anchor aria-hidden="true"></div>
+  </section>
+
+  <section class="stage stage-left summit" data-anchor aria-labelledby="atlas-contact">
+    <div class="stage-inner">
+      <div class="panel panel-summit" pwReveal>
+        <p class="sign"><span>{{ a.summit }}</span></p>
+        <h2 id="atlas-contact">{{ t.sections.contact }}</h2>
+        <p class="prose">{{ a.contactLead }}</p>
+        <ul class="contact-links">
+          <li><a [href]="p.contact.github" target="_blank" rel="noopener noreferrer">{{ t.common.github }}<span class="sr-only"> {{ t.opensNewTab }}</span></a></li>
+          <li><a [href]="p.contact.linkedin" target="_blank" rel="noopener noreferrer">{{ t.common.linkedin }}<span class="sr-only"> {{ t.opensNewTab }}</span></a></li>
+          <li><a [href]="p.contact.cv" target="_blank" rel="noopener">{{ t.common.cv }}<span class="sr-only"> {{ t.opensNewTab }}</span></a></li>
+          <li><a [href]="site.classicUrl()" rel="noopener">{{ t.common.classic }}</a></li>
+        </ul>
+        <p class="meta">{{ t.common.builtWith }}</p>
+      </div>
+    </div>
+  </section>
+</article>
+
+<nav class="altimeter" #altimeter [attr.aria-label]="a.route">
+  <span class="altimeter-line" aria-hidden="true"><span class="altimeter-dot"></span></span>
+  <ol>
+    @for (stop of stops(); track stop.index) {
+      <li [style.--at]="stop.index / 9">
+        <button type="button" (click)="goTo(stop.index)" [attr.aria-label]="stop.label" [attr.aria-current]="active() === stop.index ? 'step' : null">
+          <span class="altimeter-label">{{ stop.label }}</span>
+        </button>
+      </li>
+    }
+  </ol>
+</nav>
