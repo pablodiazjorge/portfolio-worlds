@@ -1,0 +1,11 @@
+<a class="skip-link" href="#content">{{ site.t().skip }}</a>
+<canvas #stage class="stage" [class.is-visible]="engine.visible()" aria-hidden="true"></canvas>
+<pw-dock />
+<main id="content" tabindex="-1">
+  <router-outlet />
+</main>
+@if (engine.failed()) {
+  <p class="fallback" role="status">{{ site.t().fallback }}</p>
+}
+<pw-loading-line />
+<pw-veil />

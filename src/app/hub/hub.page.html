@@ -1,0 +1,46 @@
+@let t = site.t();
+@let p = site.portfolio();
+<div class="hub">
+  <header class="hub-head">
+    <h1 class="hub-name">{{ p.name }}</h1>
+    <p class="hub-role">{{ p.role }}</p>
+  </header>
+
+  <section class="hub-worlds" aria-labelledby="hub-title">
+    <h2 id="hub-title" class="sr-only">{{ t.hub.choose }}</h2>
+    <ol class="slices">
+      @for (world of worlds; track world.id) {
+        <li class="slice" [attr.data-world]="world.id">
+          <a
+            class="slice-link"
+            [href]="site.path(world.id)"
+            (click)="go($event, world.id)"
+            (pointerenter)="prefetch(world)"
+            (focus)="prefetch(world)"
+            [attr.aria-keyshortcuts]="world.key"
+          >
+            <span class="slice-art" aria-hidden="true">
+              <img [src]="'hub/' + world.id + '.webp'" alt="" width="960" height="1200" loading="eager" decoding="async" />
+            </span>
+            <span class="slice-key" aria-hidden="true">{{ world.key }}</span>
+            <span class="slice-text">
+              <span class="slice-name">{{ t.worlds[world.id].name }}</span>
+              <span class="slice-tagline">{{ t.worlds[world.id].tagline }}</span>
+            </span>
+          </a>
+        </li>
+      }
+    </ol>
+  </section>
+
+  <footer class="hub-foot">
+    <div class="hub-lead">
+      <p class="hub-title">{{ t.hub.title }}</p>
+      <p>{{ t.hub.lead }}</p>
+    </div>
+    <p class="hub-meta">
+      <span>{{ t.dock.hint }}</span>
+      <a [href]="site.classicUrl()" rel="noopener">{{ t.hub.classic }}</a>
+    </p>
+  </footer>
+</div>

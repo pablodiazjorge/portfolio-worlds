@@ -1,0 +1,69 @@
+.veil {
+  position: fixed;
+  inset: 0;
+  z-index: 50;
+  display: grid;
+  place-items: center;
+  background: var(--veil-bg);
+  opacity: 0;
+  pointer-events: none;
+  transition: opacity 0.7s var(--ease-out-quart);
+}
+
+.veil.is-on {
+  opacity: 1;
+  pointer-events: auto;
+  transition: opacity 0.5s var(--ease-in-out-cubic);
+}
+
+.veil-name {
+  color: #f2f0ec;
+  font-size: clamp(2.5rem, 9vw, 7rem);
+  line-height: 1;
+  letter-spacing: -0.02em;
+  opacity: 0;
+  transform: translateY(0.4em);
+  transition:
+    opacity 0.4s ease-out,
+    transform 0.9s var(--ease-out-expo);
+}
+
+.veil.is-on .veil-name {
+  opacity: 1;
+  transform: none;
+  transition-delay: 0.12s;
+}
+
+.veil[data-target='hub'] .veil-name {
+  font-family: var(--font-sans);
+  font-weight: 600;
+}
+
+.veil[data-target='atlas'] .veil-name {
+  font-family: var(--font-atlas);
+  font-weight: 300;
+  font-variation-settings: 'SOFT' 100, 'WONK' 0;
+}
+
+.veil[data-target='aeris'] .veil-name {
+  color: #1d2026;
+  font-family: var(--font-aeris);
+  font-weight: 700;
+  letter-spacing: -0.04em;
+}
+
+.veil[data-target='terra'] .veil-name {
+  font-family: var(--font-terra);
+  font-weight: 800;
+}
+
+.veil[data-target='helios'] .veil-name {
+  font-family: var(--font-helios);
+  font-size: clamp(2rem, 7vw, 5.5rem);
+  letter-spacing: 0.2em;
+}
+
+.veil[data-target='atrium'] .veil-name {
+  font-family: var(--font-atrium);
+  font-weight: 500;
+}

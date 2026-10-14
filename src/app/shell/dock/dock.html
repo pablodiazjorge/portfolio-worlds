@@ -1,0 +1,50 @@
+@let t = site.t();
+<nav class="dock" [attr.aria-label]="t.dock.label">
+  <a
+    class="dock-home"
+    [href]="site.path(null)"
+    (click)="go($event, null)"
+    [attr.aria-current]="site.world() === null ? 'page' : null"
+    [attr.aria-label]="t.dock.home"
+    [title]="t.dock.home + ' (0)'"
+    aria-keyshortcuts="0"
+  >
+    <svg viewBox="0 0 32 32" aria-hidden="true">
+      <circle cx="16" cy="7.5" r="3.4" />
+      <circle cx="24.1" cy="13.4" r="3.4" />
+      <circle cx="21" cy="22.9" r="3.4" />
+      <circle cx="11" cy="22.9" r="3.4" />
+      <circle cx="7.9" cy="13.4" r="3.4" />
+    </svg>
+  </a>
+  <ol class="dock-worlds">
+    @for (world of worlds; track world.id) {
+      <li>
+        <a
+          class="dock-world"
+          [href]="site.path(world.id)"
+          (click)="go($event, world.id)"
+          (pointerenter)="prefetch(world)"
+          (focus)="prefetch(world)"
+          [attr.aria-current]="site.world() === world.id ? 'page' : null"
+          [attr.aria-keyshortcuts]="world.key"
+          [title]="t.worlds[world.id].name + ' (' + world.key + ')'"
+          [style.--swatch-a]="world.swatch[0]"
+          [style.--swatch-b]="world.swatch[1]"
+        >
+          <span class="swatch" aria-hidden="true"></span>
+          <span class="name"><span>{{ t.worlds[world.id].name }}</span></span>
+        </a>
+      </li>
+    }
+  </ol>
+  <a
+    class="dock-lang"
+    [href]="site.path(site.world(), site.otherLang())"
+    [attr.hreflang]="site.otherLang()"
+    [attr.lang]="site.otherLang()"
+    [attr.aria-label]="t.switchLang.label"
+    (click)="switchLang($event)"
+  >{{ t.switchLang.short }}</a>
+</nav>
+<p class="sr-only">{{ t.dock.hint }}</p>
