@@ -28,10 +28,11 @@ function dequantizeGeometry(geometry: BufferGeometry): void {
  * attributes back to floats and bakes the node transform into the geometry, so every mesh sits
  * at its parent's origin and positions are in scene units. Animate the parent nodes instead.
  */
-export function dequantizeMeshes(root: Object3D): void {
+export function dequantizeMeshes(root: Object3D, include: (mesh: Mesh) => boolean = () => true): void {
   const meshes: Mesh[] = [];
   root.traverse((object) => {
-    if ((object as Mesh).isMesh && !(object as Mesh & { isInstancedMesh?: boolean }).isInstancedMesh) meshes.push(object as Mesh);
+    const mesh = object as Mesh & { isInstancedMesh?: boolean };
+    if (mesh.isMesh && !mesh.isInstancedMesh && include(mesh)) meshes.push(mesh);
   });
   for (const mesh of meshes) {
     dequantizeGeometry(mesh.geometry);

@@ -1,7 +1,8 @@
 """ATLAS: a low-poly alpine valley with a trail that climbs from base camp to a summit observatory.
 
 Blender axes: X east, Y north, Z up (the glTF exporter converts to Y up).
-The camera rig in the app reads the `anchor_*` empties and the `water` empty.
+The camera rig in the app reads the `anchor_*` empties and the `water` empty; `smoke_*` empties
+mark chimneys and campfires for the app's smoke.
 """
 
 import math
@@ -12,7 +13,9 @@ import sys
 import bmesh
 import bpy
 import numpy as np
-from mathutils import Vector, noise
+from mathutils import Matrix, Vector, noise
+from mathutils.bvhtree import BVHTree
+from mathutils.kdtree import KDTree
 
 sys.path.append(os.path.join(os.path.dirname(os.path.abspath(__file__)), "_lib"))
 import pw  # noqa: E402
@@ -20,13 +23,15 @@ import pw  # noqa: E402
 args = pw.parse_args()
 pw.reset(args.seed)
 noise.seed_set(args.seed)
+rng = random.Random(args.seed)
 
 SIZE = 440.0
-RES = 176
+RES = 240
 WATER = 1.2
 SNOWLINE = 66.0
+TRAIL_HALF = 0.55
 
-# Trail waypoints: (x, y, target altitude). The terrain grows a ridge whose crest follows them.
+# Trail waypoints: (name, x, y, target altitude). The terrain grows a ridge whose crest follows them.
 ROUTE = [
     ("base", 22.0, -104.0, 4.0),
     ("camp_1", 36.0, -60.0, 13.0),
@@ -37,15 +42,12 @@ ROUTE = [
     ("ridge", 24.0, 126.0, 88.0),
     ("summit", 40.0, 150.0, 112.0),
 ]
+SITES = {name: (x, y) for name, x, y, _ in ROUTE}
+PAD = {"base": 9.0, "summit": 8.0, "ridge": 5.5}
 LAKE = (-6.0, -62.0, 26.0, 17.0)
 
 
-def axis_x(y):
-    return 16.0 * math.sin(y * 0.011) - 10.0 + 6.0 * math.sin(y * 0.029 + 1.3)
-
-
 def catmull(points, samples_per_segment):
-    """Centripetal-ish Catmull-Rom through 2D/3D tuples."""
     out = []
     pts = [points[0]] + list(points) + [points[-1]]
     for i in range(1, len(pts) - 2):
@@ -53,14 +55,12 @@ def catmull(points, samples_per_segment):
         for s in range(samples_per_segment):
             t = s / samples_per_segment
             t2, t3 = t * t, t * t * t
-            out.append(
-                0.5 * ((2 * p1) + (-p0 + p2) * t + (2 * p0 - 5 * p1 + 4 * p2 - p3) * t2 + (-p0 + 3 * p1 - 3 * p2 + p3) * t3)
-            )
+            out.append(0.5 * ((2 * p1) + (-p0 + p2) * t + (2 * p0 - 5 * p1 + 4 * p2 - p3) * t2 + (-p0 + 3 * p1 - 3 * p2 + p3) * t3))
     out.append(Vector(points[-1]))
     return out
 
 
-ROUTE_SAMPLES = np.array([[p.x, p.y, p.z] for p in catmull([(x, y, alt) for _, x, y, alt in ROUTE], 90)])
+ROUTE_SAMPLES = np.array([[p.x, p.y, p.z] for p in catmull([(x, y, alt) for _, x, y, alt in ROUTE], 120)])
 
 
 def route_distance(x, y):
@@ -72,8 +72,8 @@ def route_distance(x, y):
     return math.sqrt(float(d2[k])), float(ROUTE_SAMPLES[k, 2])
 
 
-def stable_hash(text):
-    return sum(ord(ch) * (i + 1) for i, ch in enumerate(text))
+def axis_x(y):
+    return 16.0 * math.sin(y * 0.011) - 10.0 + 6.0 * math.sin(y * 0.029 + 1.3)
 
 
 def base_height(x, y):
@@ -90,7 +90,8 @@ def base_height(x, y):
     summit += 30.0 * math.exp(-(((x + 18.0) / 26.0) ** 2 + ((y - 168.0) / 20.0) ** 2))
     summit += 26.0 * math.exp(-(((x - 98.0) / 24.0) ** 2 + ((y - 132.0) / 22.0) ** 2))
     ends = pw.smoothstep(150.0, 220.0, abs(y)) * 36.0
-    river = 2.6 * math.exp(-((x - ax) / 4.5) ** 2)
+    # the stream fades out before the valley ends rise, or its dry bed reads as a pale streak up the slope
+    river = 2.6 * math.exp(-((x - ax) / 4.5) ** 2) * (1.0 - pw.smoothstep(118.0, 160.0, abs(y)))
     lx, ly, lrx, lry = LAKE
     lake = 5.0 * math.exp(-(((x - lx) / lrx) ** 2 + ((y - ly) / lry) ** 2))
     detail = noise.fractal(Vector((x * 0.045, y * 0.045, 3.1)), 0.7, 2.0, 3) * (0.8 + 0.04 * walls)
@@ -102,15 +103,15 @@ def height(x, y):
     d, alt = route_distance(x, y)
     if d < 60.0:
         roughness = noise.ridged_multi_fractal(Vector((x * 0.05, y * 0.05, 5.0)), 1.0, 2.0, 3, 1.0, 2.0)
-        crest = alt - d * 0.42 - (d * d) * 0.004 + roughness * pw.smoothstep(2.0, 14.0, d) * (2.0 + alt * 0.05)
+        crest = alt - d * 0.42 - (d * d) * 0.004 + roughness * pw.smoothstep(4.0, 16.0, d) * (2.0 + alt * 0.05)
         blend = pw.smoothstep(0.0, 1.0, (crest - h + 6.0) / 12.0)
         h = max(h, pw.lerp(h, crest, blend))
-        # keep the path itself walkable
-        h = pw.lerp(alt, h, pw.smoothstep(0.8, 3.5, d))
+        # a corridor several cells wide, so the mesh can actually carry a smooth path
+        h = pw.lerp(alt, h, pw.smoothstep(3.0, 9.0, d))
     for name, sx, sy, alt in ROUTE:
-        r = 7.0 if name in ("base", "summit") else 4.5
-        dist2 = (x - sx) ** 2 + (y - sy) ** 2
-        h = pw.lerp(h, alt, math.exp(-dist2 / (r * r)) * 0.92)
+        r = PAD.get(name, 6.5)
+        dist = math.hypot(x - sx, y - sy)
+        h = pw.lerp(h, alt, 1.0 - pw.smoothstep(r * 0.55, r * 1.35, dist))
     return h
 
 
@@ -118,19 +119,16 @@ def height(x, y):
 step = SIZE / RES
 heights = [[0.0] * (RES + 1) for _ in range(RES + 1)]
 coords = [[(0.0, 0.0)] * (RES + 1) for _ in range(RES + 1)]
-rng = random.Random(args.seed)
 for j in range(RES + 1):
     for i in range(RES + 1):
         x = -SIZE / 2 + i * step
         y = -SIZE / 2 + j * step
         if 0 < i < RES and 0 < j < RES:
-            x += rng.uniform(-0.32, 0.32) * step
-            y += rng.uniform(-0.32, 0.32) * step
+            x += rng.uniform(-0.3, 0.3) * step
+            y += rng.uniform(-0.3, 0.3) * step
         coords[j][i] = (x, y)
         heights[j][i] = height(x, y)
 
-verts = []
-colors = []
 C = {k: Vector(pw.hex_color(v)[:3]) for k, v in {
     "meadow_low": "#6f8c50",
     "meadow_high": "#93a15c",
@@ -139,8 +137,13 @@ C = {k: Vector(pw.hex_color(v)[:3]) for k, v in {
     "rock_dark": "#5e576b",
     "snow": "#e2e6ef",
     "bank": "#a89d84",
+    "earth": "#a8875c",
+    "gravel": "#a19a91",
+    "packed_snow": "#c9d0dc",
+    "pad": "#9a8a68",
 }.items()}
 
+verts, colors = [], []
 for j in range(RES + 1):
     for i in range(RES + 1):
         x, y = coords[j][i]
@@ -162,8 +165,16 @@ for j in range(RES + 1):
         snow_line = SNOWLINE + 5.0 * noise.noise(Vector((x * 0.05, y * 0.05, 4.0)))
         snow_w = pw.smoothstep(snow_line - 4.0, snow_line + 3.0, h) * (1.0 - pw.smoothstep(0.32, 0.5, slope))
         bank_w = 1.0 - pw.smoothstep(WATER + 0.2, WATER + 1.4, h)
-
         col = grass.lerp(rock, rock_w).lerp(C["snow"], snow_w).lerp(C["bank"], bank_w)
+
+        # trampled ground around each camp
+        for name, (sx, sy) in SITES.items():
+            dist = math.hypot(x - sx, y - sy)
+            r = PAD.get(name, 6.5)
+            if dist < r:
+                worn = (1.0 - pw.smoothstep(r * 0.3, r, dist)) * (0.35 if h > SNOWLINE else 0.55)
+                col = col.lerp(C["pad"] if h < SNOWLINE else C["packed_snow"], worn)
+
         shade = 1.0 - max(0.0, min(0.32, concavity * 0.07)) + max(0.0, min(0.08, -concavity * 0.02))
         col = col * shade
         colors.append((col.x, col.y, col.z, 1.0))
@@ -183,17 +194,28 @@ for j in range(RES):
 terrain = pw.mesh_object("terrain", verts, faces, pw.vertex_color_material("terrain"))
 pw.set_vertex_colors(terrain, colors)
 
+# Exact surface queries against the built mesh, so nothing floats or sinks.
+BVH = BVHTree.FromPolygons([Vector(v) for v in verts], faces)
+KD = KDTree(len(verts))
+for k, v in enumerate(verts):
+    KD.insert(Vector(v), k)
+KD.balance()
 
-def ground(x, y):
-    """Height of the built mesh under (x, y), bilinear over the grid cell."""
-    fi = (x + SIZE / 2) / step
-    fj = (y + SIZE / 2) / step
-    i = max(0, min(RES - 1, int(fi)))
-    j = max(0, min(RES - 1, int(fj)))
-    tx, ty = fi - i, fj - j
-    h00, h10 = heights[j][i], heights[j][i + 1]
-    h01, h11 = heights[j + 1][i], heights[j + 1][i + 1]
-    return pw.lerp(pw.lerp(h00, h10, tx), pw.lerp(h01, h11, tx), ty)
+
+def surface(x, y):
+    hit = BVH.ray_cast(Vector((x, y, 600.0)), Vector((0.0, 0.0, -1.0)))
+    return hit[0].z if hit[0] is not None else 0.0
+
+
+def surface_normal(x, y):
+    hit = BVH.ray_cast(Vector((x, y, 600.0)), Vector((0.0, 0.0, -1.0)))
+    return hit[1] if hit[1] is not None else Vector((0, 0, 1))
+
+
+def terrain_color(x, y):
+    _, index, _ = KD.find(Vector((x, y, surface(x, y))))
+    c = colors[index]
+    return Vector(c[:3])
 
 
 # --- distant ring of mountains for the horizon ---------------------------------
@@ -217,22 +239,583 @@ for r in range(ROWS - 1):
 ring = pw.mesh_object("horizon", ring_verts, ring_faces, pw.vertex_color_material("horizon"))
 pw.set_vertex_colors(ring, ring_colors)
 
-# --- trail ribbon --------------------------------------------------------------
-trail_pts = [Vector((p.x, p.y, 0.0)) for p in catmull([(x, y, alt) for _, x, y, alt in ROUTE], 60)]
-tv, tf = [], []
-for k, p in enumerate(trail_pts):
-    nxt = trail_pts[min(k + 1, len(trail_pts) - 1)]
-    prv = trail_pts[max(k - 1, 0)]
-    tangent = (nxt - prv).normalized()
-    side = Vector((-tangent.y, tangent.x, 0.0)) * 0.42
-    for q in (p - side, p + side):
-        tv.append((q.x, q.y, ground(q.x, q.y) + 0.12))
-    if k > 0:
-        a = (k - 1) * 2
-        tf.append((a, a + 1, a + 3, a + 2))
-pw.mesh_object("trail", tv, tf, pw.material("trail", "#d7c49a", roughness=1.0))
+# --- materials -------------------------------------------------------------------------
+M = {
+    "fabric_orange": pw.material("fabric_orange", "#e5703a", 0.85),
+    "fabric_yellow": pw.material("fabric_yellow", "#efbd4a", 0.85),
+    "fabric_teal": pw.material("fabric_teal", "#2f8f8a", 0.85),
+    "fabric_red": pw.material("fabric_red", "#c8433a", 0.85),
+    "fabric_green": pw.material("fabric_green", "#5d7f3e", 0.85),
+    "fabric_blue": pw.material("fabric_blue", "#3d64a8", 0.85),
+    "fabric_dark": pw.material("fabric_dark", "#2a2b33", 0.9),
+    "rope": pw.material("rope", "#d9cfb8", 0.9),
+    "metal": pw.material("metal", "#c9ccd2", 0.45, 0.6),
+    "metal_dark": pw.material("metal_dark", "#3a3d44", 0.5, 0.5),
+    "wood": pw.material("wood", "#7a5537", 0.9),
+    "wood_dark": pw.material("wood_dark", "#4e3524", 0.9),
+    "wood_light": pw.material("wood_light", "#b08a5e", 0.85),
+    "stone": pw.material("stone", "#8b8494", 0.95),
+    "stone_light": pw.material("stone_light", "#b1aab5", 0.95),
+    "roof": pw.material("roof", "#7a3b2e", 0.8),
+    "solar": pw.material("solar", "#1d2f55", 0.3, 0.4),
+    "white": pw.material("white_paint", "#eeeef0", 0.5),
+    "sign": pw.material("sign_yellow", "#f3c22f", 0.6),
+    "marker_red": pw.material("marker_red", "#d23b2f", 0.6),
+    "snow": pw.material("snow_block", "#e6eaf1", 0.8),
+    "dark": pw.material("observatory_slit", "#1d2030", 0.6),
+    "observatory": pw.material("observatory_white", "#eeeef0", 0.45, 0.05),
+    "glow_fire": pw.material("fire_glow", "#ffb24a", 1.0, emission="#ff9a3a", emission_strength=6.0),
+    "ember": pw.material("ember", "#ff7a2a", 1.0, emission="#ff6a1a", emission_strength=4.0),
+    "lantern": pw.material("lantern_glass", "#ffe2a8", 1.0, emission="#ffcf7a", emission_strength=5.0),
+    "window": pw.material("window_warm", "#ffd9a0", 1.0, emission="#ffc777", emission_strength=3.0),
+    "beacon": pw.material("beacon", "#ff5a4a", 1.0, emission="#ff4a3a", emission_strength=8.0),
+    "trail": pw.vertex_color_material("trail", roughness=1.0),
+    "flower_white": pw.material("flower_white", "#f4f1ea", 0.8),
+    "flower_yellow": pw.material("flower_yellow", "#f2c94c", 0.8),
+    "flower_violet": pw.material("flower_violet", "#9a7fd1", 0.8),
+    "flower_pink": pw.material("flower_pink", "#e58fa8", 0.8),
+}
+for k, hexcol in enumerate(("#2f6fd0", "#f4f4f0", "#d8483a", "#3f9a5a", "#f2c14e")):
+    M[f"prayer_{k}"] = pw.material(f"prayer_{k}", hexcol, 0.9)
 
-# --- trees ---------------------------------------------------------------------
+
+class Kit:
+    """Collects prop geometry per material; each material becomes one mesh."""
+
+    def __init__(self, prefix):
+        self.prefix = prefix
+        self.meshes = {}
+
+    def bm(self, mat):
+        if mat not in self.meshes:
+            self.meshes[mat] = bmesh.new()
+        return self.meshes[mat]
+
+    @staticmethod
+    def _place(bm, vs, origin, rot):
+        bmesh.ops.rotate(bm, verts=vs, cent=(0, 0, 0), matrix=Matrix.Rotation(rot, 3, "Z"))
+        bmesh.ops.translate(bm, verts=vs, vec=Vector(origin))
+
+    def box(self, mat, origin, rot, center, size, tilt=None):
+        bm = self.bm(mat)
+        vs = bmesh.ops.create_cube(bm, size=1.0)["verts"]
+        bmesh.ops.scale(bm, vec=Vector(size), verts=vs)
+        if tilt:
+            axis, angle = tilt
+            bmesh.ops.rotate(bm, verts=vs, cent=(0, 0, 0), matrix=Matrix.Rotation(angle, 3, axis))
+        bmesh.ops.translate(bm, verts=vs, vec=Vector(center))
+        self._place(bm, vs, origin, rot)
+        return vs
+
+    def cyl(self, mat, origin, rot, a, b, r1, r2=None, seg=8):
+        bm = self.bm(mat)
+        a, b = Vector(a), Vector(b)
+        d = b - a
+        vs = pw.add_cone(bm, (0, 0, 0), r1, r1 if r2 is None else r2, max(d.length, 1e-4), segments=seg)
+        rotation = Vector((0, 0, 1)).rotation_difference(d.normalized()).to_matrix()
+        bmesh.ops.rotate(bm, verts=vs, cent=(0, 0, 0), matrix=rotation)
+        bmesh.ops.translate(bm, verts=vs, vec=a)
+        self._place(bm, vs, origin, rot)
+        return vs
+
+    def ico(self, mat, origin, rot, center, r, scale=(1, 1, 1), sub=1):
+        bm = self.bm(mat)
+        vs = bmesh.ops.create_icosphere(bm, subdivisions=sub, radius=r)["verts"]
+        bmesh.ops.scale(bm, vec=Vector(scale), verts=vs)
+        bmesh.ops.translate(bm, verts=vs, vec=Vector(center))
+        self._place(bm, vs, origin, rot)
+        return vs
+
+    def poly(self, mat, origin, rot, points):
+        bm = self.bm(mat)
+        vs = [bm.verts.new(Vector(p)) for p in points]
+        bm.faces.new(vs)
+        self._place(bm, vs, origin, rot)
+        return vs
+
+    def dome(self, mat, origin, rot, center, r, squash=0.65, seg=12):
+        bm = self.bm(mat)
+        vs = bmesh.ops.create_uvsphere(bm, u_segments=seg, v_segments=seg // 2, radius=r)["verts"]
+        bmesh.ops.delete(bm, geom=[v for v in vs if v.co.z < -0.001], context="VERTS")
+        vs = [v for v in vs if v.is_valid]
+        for v in vs:
+            v.co.z *= squash
+        bmesh.ops.translate(bm, verts=vs, vec=Vector(center))
+        self._place(bm, vs, origin, rot)
+        return vs
+
+    def torus(self, mat, origin, rot, center, major, minor, seg=16, ring=6):
+        bm = self.bm(mat)
+        before = set(bm.verts)
+        circle = bmesh.ops.create_circle(bm, cap_ends=False, radius=minor, segments=ring)["verts"]
+        bmesh.ops.rotate(bm, verts=circle, cent=(0, 0, 0), matrix=Matrix.Rotation(math.pi / 2, 3, "X"))
+        bmesh.ops.translate(bm, verts=circle, vec=Vector((major, 0, 0)))
+        edges = list({e for v in circle for e in v.link_edges})
+        bmesh.ops.spin(bm, geom=circle + edges, cent=(0, 0, 0), axis=(0, 0, 1), angle=math.tau, steps=seg, use_duplicate=False)
+        vs = [v for v in bm.verts if v not in before]
+        bmesh.ops.remove_doubles(bm, verts=vs, dist=1e-4)
+        vs = [v for v in bm.verts if v not in before]
+        bmesh.ops.translate(bm, verts=vs, vec=Vector(center))
+        self._place(bm, vs, origin, rot)
+        return vs
+
+    def finish(self, parent=None, smooth=()):
+        for mat, bm in self.meshes.items():
+            obj = pw.bm_object(f"{self.prefix}_{mat}", bm, M[mat], smooth=mat in smooth)
+            if parent:
+                obj.parent = parent
+        self.meshes = {}
+
+
+props = Kit("props")
+
+
+def at(site, dx, dy):
+    """World point on the ground at a camp-local offset (+Y points up the trail)."""
+    sx, sy = SITES[site]
+    v = Matrix.Rotation(frame_rot(site), 3, "Z") @ Vector((dx, dy, 0))
+    x, y = sx + v.x, sy + v.y
+    return Vector((x, y, surface(x, y)))
+
+
+def frame_rot(site):
+    names = [r[0] for r in ROUTE]
+    i = names.index(site)
+    a = ROUTE[i]
+    b = ROUTE[i + 1] if i < len(ROUTE) - 1 else ROUTE[i - 1]
+    sign = 1 if i < len(ROUTE) - 1 else -1
+    d = Vector((b[1] - a[1], b[2] - a[2])) * sign
+    return math.atan2(-d.x, d.y)
+
+
+# --- prop builders (local space: +Y forward, origin on the ground) ---------------------------
+
+
+def a_frame_tent(origin, rot, color, size=1.0):
+    w, l, h = 1.25 * size, 1.9 * size, 1.0 * size
+    k = props
+    k.box("fabric_dark", origin, rot, (0, 0, 0.01), (w + 0.35, l + 0.35, 0.02))
+    over = 0.12 * size
+    for side in (-1, 1):
+        k.poly(color, origin, rot, [(side * w / 2, -l / 2, 0.02), (side * w / 2, l / 2, 0.02), (0, l / 2 + over, h), (0, -l / 2 - over, h)][::side])
+    k.poly(color, origin, rot, [(w / 2, l / 2 - 0.02, 0.02), (-w / 2, l / 2 - 0.02, 0.02), (0, l / 2 - 0.02, h)])
+    door = 0.34 * size
+    k.poly("fabric_dark", origin, rot, [(-door, -l / 2 + 0.02, 0.02), (door, -l / 2 + 0.02, 0.02), (0, -l / 2 + 0.02, h * 0.82)])
+    k.poly(color, origin, rot, [(-w / 2, -l / 2, 0.02), (-door, -l / 2, 0.02), (0, -l / 2, h * 0.82), (0, -l / 2, h)][::-1])
+    k.poly(color, origin, rot, [(door, -l / 2, 0.02), (w / 2, -l / 2, 0.02), (0, -l / 2, h), (0, -l / 2, h * 0.82)][::-1])
+    # flaps tied back on each side of the door
+    for side in (-1, 1):
+        k.poly(color, origin, rot, [(side * door, -l / 2 - 0.01, 0.02), (side * (door + 0.22), -l / 2 - 0.2, 0.05), (side * 0.06, -l / 2 - 0.02, h * 0.7)][::side])
+    # ridge pole ends, guy lines and stakes
+    for end in (-1, 1):
+        top = (0, end * (l / 2 + over), h)
+        stake = (0, end * (l / 2 + 0.75 * size), 0.02)
+        k.cyl("rope", origin, rot, top, stake, 0.008, seg=4)
+        k.cyl("metal", origin, rot, (stake[0], stake[1], -0.05), (stake[0], stake[1], 0.07), 0.015, seg=4)
+        k.cyl("wood_dark", origin, rot, (0, end * (l / 2 + over * 0.6), 0), (0, end * (l / 2 + over * 0.6), h + 0.05), 0.02, seg=5)
+    for side in (-1, 1):
+        for end in (-0.3, 0.3):
+            anchor = (side * w * 0.26, end * l, h * 0.5)
+            stake = (side * (w / 2 + 0.55 * size), end * l * 1.15, 0.02)
+            k.cyl("rope", origin, rot, anchor, stake, 0.007, seg=4)
+            k.cyl("metal", origin, rot, (stake[0], stake[1], -0.05), (stake[0], stake[1], 0.07), 0.014, seg=4)
+
+
+def dome_tent(origin, rot, color, r=0.85):
+    k = props
+    k.box("fabric_dark", origin, rot, (0, 0, 0.01), (2 * r + 0.25, 2 * r + 0.25, 0.02))
+    k.dome(color, origin, rot, (0, 0, 0.02), r, squash=0.72, seg=14)
+    # crossing poles
+    for angle in (math.pi / 4, -math.pi / 4):
+        pts = []
+        for s in range(9):
+            t = s / 8 * math.pi
+            pts.append(Matrix.Rotation(angle, 3, "Z") @ Vector((math.cos(t) * r * 1.01, 0, 0.02 + math.sin(t) * r * 0.73)))
+        for a, b in zip(pts, pts[1:]):
+            k.cyl("metal_dark", origin, rot, a, b, 0.016, seg=4)
+    # vestibule over the door
+    v = 0.55 * r
+    k.poly(color, origin, rot, [(-v, -r * 0.55, 0.02), (0, -r - 0.42, 0.02), (0, -r * 0.62, r * 0.6)])
+    k.poly(color, origin, rot, [(0, -r - 0.42, 0.02), (v, -r * 0.55, 0.02), (0, -r * 0.62, r * 0.6)])
+    k.poly("fabric_dark", origin, rot, [(-v * 0.55, -r * 0.6, 0.03), (v * 0.55, -r * 0.6, 0.03), (0, -r * 0.64, r * 0.5)])
+    for side in (-1, 1):
+        stake = (side * (r + 0.45), 0.25, 0.02)
+        k.cyl("rope", origin, rot, (side * r * 0.62, 0.15, r * 0.45), stake, 0.007, seg=4)
+        k.cyl("metal", origin, rot, (stake[0], stake[1], -0.05), (stake[0], stake[1], 0.07), 0.014, seg=4)
+
+
+def backpack(origin, rot, color):
+    k = props
+    k.box(color, origin, rot, (0, 0, 0.26), (0.34, 0.22, 0.48))
+    k.box(color, origin, rot, (0, 0.01, 0.53), (0.36, 0.25, 0.1))
+    k.box("fabric_dark", origin, rot, (0, -0.13, 0.2), (0.24, 0.06, 0.2))
+    k.cyl("fabric_blue", origin, rot, (-0.22, 0.02, 0.62), (0.22, 0.02, 0.62), 0.07, seg=8)
+    for side in (-1, 1):
+        k.box("fabric_dark", origin, rot, (side * 0.08, 0.115, 0.3), (0.04, 0.02, 0.38))
+
+
+def campfire(origin, rot):
+    k = props
+    for s in range(10):
+        a = s / 10 * math.tau
+        k.ico("stone", origin, rot, (math.cos(a) * 0.42, math.sin(a) * 0.42, 0.05), 0.1, (1.2, 1.0, 0.7))
+    for s in range(5):
+        a = s / 5 * math.tau + 0.3
+        k.cyl("wood_dark", origin, rot, (math.cos(a) * 0.32, math.sin(a) * 0.32, 0.02), (0, 0, 0.42), 0.035, seg=5)
+    k.ico("ember", origin, rot, (0, 0, 0.04), 0.2, (1.0, 1.0, 0.25))
+    bm = bmesh.new()
+    pw.add_cone(bm, (0, 0, 0), 0.2, 0.0, 0.55, segments=6)
+    fire = pw.bm_object("fire", bm, M["glow_fire"])
+    fire.location = origin + Vector((0, 0, 0.04))
+    pw.empty(f"smoke_fire", origin + Vector((0, 0, 0.6)))
+
+
+def log_seat(origin, rot, length=1.2):
+    props.cyl("wood", origin, rot, (-length / 2, 0, 0.13), (length / 2, 0, 0.13), 0.13, seg=7)
+    for end in (-1, 1):
+        props.cyl("wood_light", origin, rot, (end * length / 2, 0, 0.13), (end * (length / 2 + 0.01), 0, 0.13), 0.12, seg=7)
+
+
+def cooking_tripod(origin, rot):
+    k = props
+    for s in range(3):
+        a = s / 3 * math.tau
+        k.cyl("wood_dark", origin, rot, (math.cos(a) * 0.38, math.sin(a) * 0.38, 0), (0, 0, 0.82), 0.022, seg=4)
+    k.cyl("metal_dark", origin, rot, (0, 0, 0.8), (0, 0, 0.42), 0.006, seg=4)
+    k.cyl("metal_dark", origin, rot, (0, 0, 0.28), (0, 0, 0.44), 0.13, 0.15, seg=10)
+
+
+def lantern_post(origin, rot):
+    k = props
+    k.box("wood_dark", origin, rot, (0, 0, 0.65), (0.07, 0.07, 1.3))
+    k.box("wood_dark", origin, rot, (0.14, 0, 1.25), (0.32, 0.05, 0.05))
+    k.box("metal_dark", origin, rot, (0.26, 0, 1.07), (0.14, 0.14, 0.03))
+    k.box("lantern", origin, rot, (0.26, 0, 1.0), (0.1, 0.1, 0.13))
+    k.box("metal_dark", origin, rot, (0.26, 0, 0.93), (0.13, 0.13, 0.025))
+
+
+def signpost(origin, rot, arms):
+    """Yellow hiking signpost; arms: list of (local angle, height)."""
+    k = props
+    k.cyl("metal", origin, rot, (0, 0, 0), (0, 0, 2.0), 0.04, seg=8)
+    k.box("white", origin, rot, (0, 0, 2.02), (0.1, 0.1, 0.04))
+    k.box("marker_red", origin, rot, (0, 0, 1.97), (0.1, 0.1, 0.05))
+    for angle, z in arms:
+        k.box("sign", origin, rot + angle, (0.36, 0, z), (0.62, 0.035, 0.15))
+        k.poly("sign", origin, rot + angle, [(0.67, -0.018, z - 0.075), (0.67, -0.018, z + 0.075), (0.79, -0.018, z)])
+        k.poly("sign", origin, rot + angle, [(0.67, 0.018, z + 0.075), (0.67, 0.018, z - 0.075), (0.79, 0.018, z)])
+        k.box("fabric_dark", origin, rot + angle, (0.3, -0.019, z), (0.38, 0.004, 0.035))
+
+
+def map_board(origin, rot):
+    k = props
+    for side in (-1, 1):
+        k.box("wood_dark", origin, rot, (side * 0.55, 0, 0.7), (0.07, 0.07, 1.4))
+    k.box("wood", origin, rot, (0, 0, 1.0), (1.2, 0.05, 0.75))
+    k.box("fabric_green", origin, rot, (0, -0.03, 1.0), (1.0, 0.01, 0.6))
+    k.box("sign", origin, rot, (0.18, -0.04, 1.05), (0.18, 0.01, 0.12))
+    k.box("roof", origin, rot, (0, 0, 1.5), (1.35, 0.4, 0.05), tilt=("X", 0.25))
+
+
+def bench(origin, rot, length=1.3):
+    k = props
+    k.box("wood", origin, rot, (0, 0, 0.42), (length, 0.36, 0.06))
+    k.box("wood", origin, rot, (0, 0.17, 0.72), (length, 0.05, 0.22))
+    for side in (-1, 1):
+        k.box("wood_dark", origin, rot, (side * (length / 2 - 0.12), 0, 0.2), (0.07, 0.32, 0.4))
+        k.box("wood_dark", origin, rot, (side * (length / 2 - 0.12), 0.17, 0.55), (0.07, 0.05, 0.5))
+
+
+def picnic_table(origin, rot):
+    k = props
+    k.box("wood", origin, rot, (0, 0, 0.75), (1.6, 0.72, 0.06))
+    for side in (-1, 1):
+        k.box("wood", origin, rot, (0, side * 0.62, 0.44), (1.6, 0.26, 0.05))
+        for end in (-1, 1):
+            k.box("wood_dark", origin, rot, (end * 0.62, side * 0.22, 0.37), (0.07, 0.07, 0.75), tilt=("X", -side * 0.45))
+
+
+def crates(origin, rot):
+    k = props
+    for (x, y, z, s) in ((0, 0, 0.22, 0.44), (0.5, 0.05, 0.19, 0.38), (0.22, 0.02, 0.62, 0.36)):
+        k.box("wood_light", origin, rot, (x, y, z), (s, s * 0.9, s))
+        k.box("wood_dark", origin, rot, (x, y - s * 0.46, z), (s * 1.02, 0.02, s * 0.12))
+
+
+def firewood(origin, rot):
+    k = props
+    for row in range(3):
+        for i in range(5 - row):
+            x = -0.36 + i * 0.18 + row * 0.09
+            k.cyl("wood", origin, rot, (x, -0.35, 0.09 + row * 0.15), (x, 0.35, 0.09 + row * 0.15), 0.075, seg=6)
+    for side in (-1, 1):
+        k.cyl("wood_dark", origin, rot, (side * 0.52, 0, 0), (side * 0.52, 0, 0.6), 0.03, seg=4)
+
+
+def stone_wall(origin, rot, radius=1.6, start=-1.9, end=1.9, rows=2, mat="stone"):
+    k = props
+    count = int((end - start) * radius / 0.32)
+    for row in range(rows):
+        for s in range(count + 1):
+            a = start + (end - start) * s / max(1, count) + (0.5 / count if row % 2 else 0)
+            r = radius + rng.uniform(-0.05, 0.05)
+            k.ico(mat, origin, rot, (math.cos(a) * r, math.sin(a) * r, 0.16 + row * 0.26), 0.2, (1.1, 0.75, 0.6))
+
+
+def ice_axe(origin, rot, lean=0.12):
+    k = props
+    top = (0, math.sin(lean) * 0.7, math.cos(lean) * 0.7)
+    k.cyl("metal", origin, rot, (0, 0, -0.15), top, 0.022, seg=6)
+    k.box("metal_dark", origin, rot, (top[0], top[1], top[2] + 0.02), (0.36, 0.04, 0.05))
+    k.box("fabric_red", origin, rot, (0, top[1] * 0.6, top[2] * 0.6), (0.05, 0.05, 0.16))
+
+
+def rope_coil(origin, rot):
+    for i in range(3):
+        props.torus("fabric_red" if i % 2 else "rope", origin, rot, (0, 0, 0.03 + i * 0.035), 0.24 - i * 0.015, 0.025)
+
+
+def prayer_flags(a, b, count=12, sag=0.35):
+    """String of prayer flags between two world points."""
+    k = props
+    a, b = Vector(a), Vector(b)
+    pts = []
+    for s in range(count + 1):
+        t = s / count
+        p = a.lerp(b, t)
+        p.z -= math.sin(t * math.pi) * sag
+        pts.append(p)
+    for p, q in zip(pts, pts[1:]):
+        k.cyl("rope", Vector((0, 0, 0)), 0.0, p, q, 0.008, seg=4)
+    side = (b - a).normalized()
+    for s, p in enumerate(pts[1:-1], start=1):
+        mat = f"prayer_{s % 5}"
+        w = side * 0.12
+        k.poly(mat, Vector((0, 0, 0)), 0.0, [p - w, p + w, p + w + Vector((0, 0, -0.3)), p - w + Vector((0, 0, -0.3))])
+
+
+def flag_pole(origin, rot, mat="marker_red", height=2.4):
+    k = props
+    k.cyl("metal", origin, rot, (0, 0, 0), (0, 0, height), 0.03, seg=6)
+    k.poly(mat, origin, rot, [(0.02, 0, height - 0.02), (0.02, 0, height - 0.42), (0.68, 0, height - 0.2)])
+    k.poly(mat, origin, rot, [(0.02, 0, height - 0.42), (0.02, 0, height - 0.02), (0.68, 0, height - 0.2)])
+
+
+def cairn(origin, rot, size=1.0):
+    for i, (r, z) in enumerate(((0.36, 0.16), (0.28, 0.44), (0.21, 0.67), (0.15, 0.85), (0.1, 0.98))):
+        props.ico("stone_light" if i % 2 else "stone", origin, rot, (rng.uniform(-0.04, 0.04), rng.uniform(-0.04, 0.04), z * size), r * size, (1.0, 0.9, 0.62))
+
+
+def hut(origin, rot):
+    """Mountain refuge: stone base, timber walls, pitched roof, chimney and lit windows."""
+    k = props
+    W, L, H = 3.6, 2.8, 1.9
+    k.box("stone", origin, rot, (0, 0, 0.25), (W + 0.3, L + 0.3, 0.5))
+    k.box("wood", origin, rot, (0, 0, 0.5 + H / 2), (W, L, H))
+    for z in range(1, 7):
+        for side in (-1, 1):
+            k.box("wood_dark", origin, rot, (0, side * (L / 2 + 0.005), 0.5 + z * H / 7), (W + 0.02, 0.012, 0.03))
+            k.box("wood_dark", origin, rot, (side * (W / 2 + 0.005), 0, 0.5 + z * H / 7), (0.012, L + 0.02, 0.03))
+    ridge = 0.5 + H + 1.2
+    for side in (-1, 1):
+        k.poly("wood", origin, rot, [(side * W / 2, -L / 2, 0.5 + H), (side * W / 2, L / 2, 0.5 + H), (side * W / 2, 0, ridge)][::side])
+    pitch = math.atan2(1.2, L / 2)
+    for side in (-1, 1):
+        k.box("roof", origin, rot, (0, side * (L / 4 + 0.05), 0.5 + H + 0.62), (W + 0.6, L / 2 / math.cos(pitch) + 0.45, 0.1), tilt=("X", -side * pitch))
+    k.box("roof", origin, rot, (0, 0, ridge + 0.04), (W + 0.62, 0.16, 0.08))
+    # chimney with smoke
+    k.box("stone_light", origin, rot, (W * 0.25, L * 0.15, ridge), (0.45, 0.45, 1.2))
+    k.box("stone", origin, rot, (W * 0.25, L * 0.15, ridge + 0.62), (0.55, 0.55, 0.08))
+    chimney_top = origin + Matrix.Rotation(rot, 3, "Z") @ Vector((W * 0.25, L * 0.15, ridge + 0.75))
+    pw.empty("smoke_hut", chimney_top)
+    # door, windows and a small porch on the front (-Y)
+    k.box("wood_dark", origin, rot, (-0.6, -L / 2 - 0.02, 0.5 + 0.8), (0.75, 0.05, 1.6))
+    k.box("white", origin, rot, (-0.6, -L / 2 - 0.03, 0.5 + 1.62), (0.85, 0.04, 0.06))
+    for x in (0.75, 1.35):
+        k.box("white", origin, rot, (x, -L / 2 - 0.02, 1.55), (0.5, 0.04, 0.55))
+        k.box("window", origin, rot, (x, -L / 2 - 0.04, 1.55), (0.38, 0.03, 0.42))
+    for y in (-0.5, 0.6):
+        k.box("white", origin, rot, (W / 2 + 0.02, y, 1.55), (0.04, 0.5, 0.55))
+        k.box("window", origin, rot, (W / 2 + 0.04, y, 1.55), (0.03, 0.38, 0.42))
+    k.box("wood_light", origin, rot, (0, -L / 2 - 0.65, 0.48), (W, 1.2, 0.08))
+    for x in (-W / 2 + 0.1, W / 2 - 0.1):
+        k.box("wood_dark", origin, rot, (x, -L / 2 - 1.2, 1.15), (0.1, 0.1, 1.4))
+    k.box("roof", origin, rot, (0, -L / 2 - 0.7, 1.95), (W + 0.3, 1.5, 0.07), tilt=("X", 0.22))
+    bench(origin + Matrix.Rotation(rot, 3, "Z") @ Vector((0.9, -L / 2 - 0.55, 0.48)), rot + math.pi)
+    k.box("solar", origin, rot, (-W * 0.2, L / 4 + 0.15, 0.5 + H + 0.75), (1.1, 0.8, 0.04), tilt=("X", -pitch))
+
+
+def telescope(origin, rot):
+    k = props
+    for s in range(3):
+        a = s / 3 * math.tau
+        k.cyl("metal_dark", origin, rot, (math.cos(a) * 0.32, math.sin(a) * 0.32, 0), (0, 0, 1.05), 0.02, seg=4)
+    k.cyl("white", origin, rot, (0, -0.35, 1.0), (0, 0.45, 1.25), 0.07, 0.09, seg=10)
+    k.cyl("metal_dark", origin, rot, (0, -0.42, 0.98), (0, -0.35, 1.0), 0.04, seg=8)
+
+
+def railing(points, side_offset=None):
+    """Wooden posts with a rope between their tops, along world points."""
+    k = props
+    tops = []
+    for p in points:
+        base = Vector((p.x, p.y, surface(p.x, p.y)))
+        top = base + Vector((0, 0, 0.95))
+        k.cyl("wood_dark", Vector((0, 0, 0)), 0.0, base + Vector((0, 0, -0.2)), top, 0.035, seg=5)
+        tops.append(top)
+    for a, b in zip(tops, tops[1:]):
+        mid = (a + b) / 2 - Vector((0, 0, 0.08))
+        k.cyl("rope", Vector((0, 0, 0)), 0.0, a, mid, 0.012, seg=4)
+        k.cyl("rope", Vector((0, 0, 0)), 0.0, mid, b, 0.012, seg=4)
+
+
+def solar_stand(origin, rot):
+    k = props
+    k.box("metal_dark", origin, rot, (0, 0, 0.35), (0.05, 0.05, 0.7))
+    k.box("solar", origin, rot, (0, 0, 0.75), (0.9, 0.6, 0.03), tilt=("X", 0.6))
+
+
+def radio_mast(origin, rot):
+    k = props
+    k.cyl("metal", origin, rot, (0, 0, 0), (0, 0, 3.2), 0.04, seg=6)
+    for z in (1.6, 2.4, 3.0):
+        k.cyl("metal", origin, rot, (-0.3, 0, z), (0.3, 0, z), 0.012, seg=4)
+    for a in (0, 2.1, 4.2):
+        k.cyl("rope", origin, rot, (0, 0, 2.6), (math.cos(a) * 1.4, math.sin(a) * 1.4, 0), 0.006, seg=4)
+    k.ico("beacon", origin, rot, (0, 0, 3.25), 0.07)
+
+
+# --- the trail ------------------------------------------------------------------------------
+dense = catmull([(x, y, 0.0) for _, x, y, _ in ROUTE], 200)
+lengths = [0.0]
+for a, b in zip(dense, dense[1:]):
+    lengths.append(lengths[-1] + (b.xy - a.xy).length)
+total = lengths[-1]
+SPACING = 0.32
+samples = []
+cursor = 0
+for s in range(int(total / SPACING) + 1):
+    target = s * SPACING
+    while cursor < len(lengths) - 2 and lengths[cursor + 1] < target:
+        cursor += 1
+    span = max(1e-6, lengths[cursor + 1] - lengths[cursor])
+    t = (target - lengths[cursor]) / span
+    samples.append(dense[cursor].lerp(dense[cursor + 1], min(1.0, t)).xy)
+
+ACROSS = (-1.0, -0.5, 0.0, 0.5, 1.0)
+tv, tf, tc = [], [], []
+rows = []
+for k_, p in enumerate(samples):
+    nxt = samples[min(k_ + 1, len(samples) - 1)]
+    prv = samples[max(k_ - 1, 0)]
+    tangent = (nxt - prv).normalized()
+    side = Vector((-tangent.y, tangent.x))
+    centre_z = surface(p.x, p.y)
+    path = C["earth"].lerp(C["gravel"], pw.smoothstep(40.0, 56.0, centre_z)).lerp(C["packed_snow"], pw.smoothstep(SNOWLINE - 4.0, SNOWLINE + 2.0, centre_z))
+    wear = 0.85 + 0.15 * noise.noise(Vector((p.x * 0.6, p.y * 0.6, 3.0)))
+    row = []
+    for a in ACROSS:
+        q = p + side * (a * TRAIL_HALF)
+        z = surface(q.x, q.y) + 0.05
+        blend = 1.0 - abs(a) ** 2
+        col = terrain_color(q.x, q.y).lerp(path * wear, blend)
+        row.append(len(tv))
+        tv.append((q.x, q.y, z))
+        tc.append((col.x, col.y, col.z, 1.0))
+    rows.append((p, side, centre_z, tangent))
+    if k_ > 0:
+        prev = len(tv) - 2 * len(ACROSS)
+        for i in range(len(ACROSS) - 1):
+            tf.append((prev + i, prev + i + 1, prev + len(ACROSS) + i + 1, prev + len(ACROSS) + i))
+trail = pw.mesh_object("trail", tv, tf, M["trail"], smooth=True)
+pw.set_vertex_colors(trail, tc)
+
+
+def near_site(x, y, extra=0.0):
+    return any(math.hypot(x - sx, y - sy) < PAD.get(n, 6.5) + extra for n, (sx, sy) in SITES.items())
+
+
+# steps on steep stretches, edging stones and way-marks
+rock_src = []
+for k_ in range(3):
+    bm = bmesh.new()
+    pw.add_ico(bm, (0, 0, 0), 0.5, 1, (1.2, 0.9, 0.6))
+    for v in bm.verts:
+        v.co += Vector((rng.uniform(-0.08, 0.08), rng.uniform(-0.08, 0.08), rng.uniform(-0.05, 0.05)))
+    o = pw.bm_object(f"pebble_src_{k_}", bm, M["stone_light" if k_ == 1 else "stone"])
+    rock_src.append(o.data)
+    bpy.data.objects.remove(o)
+
+edge_col = pw.collection("trail_edges")
+marker_bm = bmesh.new()
+pw.add_cone(marker_bm, (0, 0, -0.2), 0.05, 0.05, 1.0, segments=6)
+marker_src = pw.bm_object("marker_src", marker_bm, M["wood_dark"]).data
+bpy.data.objects.remove(bpy.data.objects["marker_src"])
+band_bm = bmesh.new()
+pw.add_cone(band_bm, (0, 0, 0.55), 0.056, 0.056, 0.08, segments=6)
+pw.add_cone(band_bm, (0, 0, 0.71), 0.056, 0.056, 0.08, segments=6)
+band_src = pw.bm_object("band_src", band_bm, M["marker_red"]).data
+bpy.data.objects.remove(bpy.data.objects["band_src"])
+white_bm = bmesh.new()
+pw.add_cone(white_bm, (0, 0, 0.63), 0.056, 0.056, 0.08, segments=6)
+white_src = pw.bm_object("white_src", white_bm, M["white"]).data
+bpy.data.objects.remove(bpy.data.objects["white_src"])
+
+step_kit = props
+last_marker = -100.0
+for k_, (p, side, z, tangent) in enumerate(rows):
+    if near_site(p.x, p.y):
+        continue
+    ahead = rows[min(k_ + 3, len(rows) - 1)][2]
+    grade = (ahead - z) / (3 * SPACING)
+    distance_along = k_ * SPACING
+    if grade > 0.24 and k_ % 3 == 0:
+        a = Vector((p.x, p.y, z)) + Vector((side.x, side.y, 0)) * (TRAIL_HALF * 0.95)
+        b = Vector((p.x, p.y, z)) - Vector((side.x, side.y, 0)) * (TRAIL_HALF * 0.95)
+        if z < 56:
+            step_kit.cyl("wood", Vector((0, 0, 0)), 0.0, a + Vector((0, 0, 0.03)), b + Vector((0, 0, 0.03)), 0.06, seg=6)
+        else:
+            centre = Vector((p.x, p.y, z + 0.02))
+            step_kit.box("stone_light", centre, math.atan2(side.y, side.x), (0, 0, 0), (TRAIL_HALF * 1.9, 0.26, 0.09))
+    if k_ % 4 == 0:
+        s = 1 if (k_ // 4) % 2 else -1
+        q = p + side * s * (TRAIL_HALF + 0.18 + rng.uniform(0, 0.12))
+        obj = bpy.data.objects.new(f"pebble_{k_}", rock_src[k_ % 3])
+        size = rng.uniform(0.14, 0.32)
+        obj.scale = (size, size * rng.uniform(0.7, 1.1), size * rng.uniform(0.5, 0.9))
+        obj.rotation_euler = (0, 0, rng.uniform(0, math.tau))
+        obj.location = (q.x, q.y, surface(q.x, q.y) - size * 0.15)
+        edge_col.objects.link(obj)
+    if distance_along - last_marker > 22.0 and z < SNOWLINE + 6:
+        last_marker = distance_along
+        q = p + side * (TRAIL_HALF + 0.7)
+        for mesh_ in (marker_src, band_src, white_src):
+            obj = bpy.data.objects.new(f"marker_{k_}_{mesh_.name}", mesh_)
+            obj.location = (q.x, q.y, surface(q.x, q.y))
+            edge_col.objects.link(obj)
+
+# a rope handrail along the exposed final stretch, on the downhill side
+exposed = []
+for p, side, z, tangent in rows:
+    if z < 74 or near_site(p.x, p.y, 1.0):
+        continue
+    left = surface(*(p + side * 2.5))
+    right = surface(*(p - side * 2.5))
+    s = 1 if left < right else -1
+    exposed.append(p + side * s * (TRAIL_HALF + 0.35))
+segments, current = [], []
+for q in exposed[::8]:
+    if current and (q - current[-1].xy).length > 4.0:
+        segments.append(current)
+        current = []
+    current.append(Vector((q.x, q.y, 0)))
+if current:
+    segments.append(current)
+for seg in segments:
+    if len(seg) > 1:
+        railing(seg)
+
+# --- trees -------------------------------------------------------------------------------------
 foliage = pw.material("pine_foliage", "#2e5242", roughness=0.9)
 foliage_light = pw.material("pine_foliage_light", "#3d6a4a", roughness=0.9)
 trunk = pw.material("pine_trunk", "#5b4232", roughness=1.0)
@@ -258,24 +841,21 @@ pine_round = pine_mesh("pine_round", 3, foliage_light)
 trees_col = pw.collection("trees")
 placed = 0
 attempts = 0
-while placed < 1700 and attempts < 60000:
+while placed < 1800 and attempts < 70000:
     attempts += 1
     x = rng.uniform(-200.0, 200.0)
     y = rng.uniform(-200.0, 190.0)
-    h = ground(x, y)
+    h = surface(x, y)
     if h < WATER + 1.4 or h > 50.0:
         continue
-    gx = ground(x + 1.5, y) - ground(x - 1.5, y)
-    gy = ground(x, y + 1.5) - ground(x, y - 1.5)
-    if math.hypot(gx, gy) / 3.0 > 0.55:
+    n = surface_normal(x, y)
+    if n.z < 0.84:
         continue
     density = noise.noise(Vector((x * 0.028, y * 0.028, 1.7)))
     if density < -0.05 - 0.25 * pw.smoothstep(30.0, 50.0, h):
         continue
     d_route, _ = route_distance(x, y)
-    if d_route < 3.2:
-        continue
-    if any((x - sx) ** 2 + (y - sy) ** 2 < 64.0 for _, sx, sy, _ in ROUTE):
+    if d_route < 3.4 or near_site(x, y, 2.5):
         continue
     mesh = pine_tall if rng.random() < 0.65 else pine_round
     obj = bpy.data.objects.new(f"tree_{placed}", mesh)
@@ -287,173 +867,274 @@ while placed < 1700 and attempts < 60000:
     placed += 1
 print(f"[pw] trees placed: {placed}")
 
-# --- rocks -----------------------------------------------------------------------
-rock_mat = pw.material("boulder", "#837b8c", roughness=0.95)
-bm = bmesh.new()
-pw.add_ico(bm, (0, 0, 0), 0.6, subdivisions=1, scale=(1.2, 0.9, 0.7))
-for v in bm.verts:
-    v.co += Vector((rng.uniform(-0.08, 0.08), rng.uniform(-0.08, 0.08), rng.uniform(-0.06, 0.06)))
-boulder = pw.bm_object("boulder_src", bm, rock_mat).data
-bpy.data.objects.remove(bpy.data.objects["boulder_src"])
+# --- boulders ----------------------------------------------------------------------------------------
 rocks_col = pw.collection("rocks")
-for k in range(160):
+for k in range(220):
     x = rng.uniform(-170.0, 170.0)
     y = rng.uniform(-170.0, 170.0)
-    h = ground(x, y)
-    if h < WATER + 0.6 or h > 90.0:
+    h = surface(x, y)
+    if h < WATER + 0.6 or h > 95.0 or route_distance(x, y)[0] < 2.0 or near_site(x, y):
         continue
-    obj = bpy.data.objects.new(f"rock_{k}", boulder)
-    s = rng.uniform(0.6, 2.4)
-    obj.scale = (s, s * rng.uniform(0.7, 1.2), s * rng.uniform(0.6, 1.0))
+    obj = bpy.data.objects.new(f"rock_{k}", rock_src[k % 3])
+    s = rng.uniform(1.0, 4.0)
+    obj.scale = (s, s * rng.uniform(0.75, 1.2), s * rng.uniform(0.8, 1.25))
     obj.rotation_euler = (0.0, 0.0, rng.uniform(0, math.tau))
-    obj.location = (x, y, h - 0.2 * s)
+    obj.location = (x, y, h - 0.06 * s)
     rocks_col.objects.link(obj)
 
-# The source meshes for instancing should not render at the origin.
+# --- grass tufts and flowers along the trail and around the camps ---------------------------------------------
+grass_mat = pw.material("grass_tuft", "#7d9a52", 0.9)
+grass_dry = pw.material("grass_tuft_dry", "#a7a35f", 0.9)
+
+
+def tuft_mesh(name, mat):
+    # Seven curved blades: a narrowing quad up to the knee, then a leaning tip. The blades draw
+    # from their own generator so everything placed after them keeps its layout.
+    for _ in range(10):
+        rng.random()
+    blade = random.Random(f"{args.seed}-{name}")
+    bm = bmesh.new()
+    for k in range(7):
+        a = k / 7 * math.tau + blade.uniform(-0.35, 0.35)
+        out = Vector((math.cos(a), math.sin(a), 0))
+        side = Vector((-math.sin(a), math.cos(a), 0))
+        tall = blade.uniform(0.3, 0.46)
+        root = out * blade.uniform(0.0, 0.05)
+        v1 = bm.verts.new(root - side * 0.032)
+        v2 = bm.verts.new(root + side * 0.032)
+        knee = root + out * tall * 0.16 + Vector((0, 0, tall * 0.55))
+        v3 = bm.verts.new(knee + side * 0.02)
+        v4 = bm.verts.new(knee - side * 0.02)
+        v5 = bm.verts.new(root + out * tall * 0.45 + Vector((0, 0, tall)))
+        bm.faces.new((v1, v2, v3, v4))
+        bm.faces.new((v4, v3, v5))
+    o = pw.bm_object(name, bm, mat)
+    data = o.data
+    bpy.data.objects.remove(o)
+    return data
+
+
+tufts = [tuft_mesh("tuft_green", grass_mat), tuft_mesh("tuft_dry", grass_dry)]
+flower_meshes = []
+for name in ("flower_white", "flower_yellow", "flower_violet", "flower_pink"):
+    bm = bmesh.new()
+    pw.add_ico(bm, (0, 0, 0.12), 0.045, 1, (1.0, 1.0, 0.6))
+    o = pw.bm_object(f"{name}_src", bm, M[name])
+    flower_meshes.append(o.data)
+    bpy.data.objects.remove(o)
+
+detail_col = pw.collection("ground_detail")
+count_tufts = 0
+count_flowers = 0
+attempts = 0
+while (count_tufts < 2600 or count_flowers < 700) and attempts < 60000:
+    attempts += 1
+    # half the samples hug the trail, the rest gather round the camps
+    if attempts % 2:
+        p, side, z, _ = rows[rng.randrange(len(rows))]
+        q = p + side * rng.choice((-1, 1)) * rng.uniform(TRAIL_HALF + 0.15, 7.0)
+    else:
+        name = rng.choice([n for n in SITES if n not in ("summit",)])
+        sx, sy = SITES[name]
+        a = rng.uniform(0, math.tau)
+        r = rng.uniform(1.5, PAD.get(name, 6.5) + 6.0)
+        q = Vector((sx + math.cos(a) * r, sy + math.sin(a) * r))
+    h = surface(q.x, q.y)
+    if h > 62 or h < WATER + 0.8 or surface_normal(q.x, q.y).z < 0.82:
+        continue
+    if route_distance(q.x, q.y)[0] < TRAIL_HALF + 0.12:
+        continue
+    if count_flowers < 700 and h < 44 and rng.random() < 0.25:
+        obj = bpy.data.objects.new(f"flower_{count_flowers}", flower_meshes[count_flowers % 4])
+        s = rng.uniform(0.8, 1.4)
+        count_flowers += 1
+    elif count_tufts < 2600:
+        obj = bpy.data.objects.new(f"tuft_{count_tufts}", tufts[0 if h < 30 else 1] if rng.random() < 0.8 and h < 54 else tufts[1])
+        s = rng.uniform(0.9, 1.8)
+        count_tufts += 1
+    else:
+        continue
+    obj.scale = (s, s, s)
+    obj.rotation_euler = (0, 0, rng.uniform(0, math.tau))
+    obj.location = (q.x, q.y, h - 0.02)
+    detail_col.objects.link(obj)
+print(f"[pw] tufts {count_tufts}, flowers {count_flowers}")
+
+# scree round the high camps, where nothing grows
+for name in ("camp_3", "camp_4", "camp_5", "ridge"):
+    sx, sy = SITES[name]
+    for k in range(90):
+        a = rng.uniform(0, math.tau)
+        r = rng.uniform(2.5, 12.0)
+        x, y = sx + math.cos(a) * r, sy + math.sin(a) * r
+        if route_distance(x, y)[0] < TRAIL_HALF + 0.3:
+            continue
+        obj = bpy.data.objects.new(f"scree_{name}_{k}", rock_src[k % 3])
+        s = rng.uniform(0.12, 0.45) * (1.6 if rng.random() < 0.12 else 1.0)
+        obj.scale = (s, s * rng.uniform(0.7, 1.2), s * rng.uniform(0.5, 0.8))
+        obj.rotation_euler = (0, 0, rng.uniform(0, math.tau))
+        obj.location = (x, y, surface(x, y) - s * 0.1)
+        detail_col.objects.link(obj)
+
 for name in ("pine_tall", "pine_round"):
     bpy.data.objects.remove(bpy.data.objects[name])
 
-# --- camps and props ---------------------------------------------------------------
-fabric = [pw.material("tent_orange", "#e5703a", 0.85), pw.material("tent_yellow", "#efbd4a", 0.85)]
-flag_mat = pw.material("flag", "#d8483a", 0.8)
-pole_mat = pw.material("pole", "#d9d6cf", 0.6, 0.2)
-wood = pw.material("wood", "#7a5537", 0.9)
-stone = pw.material("stone", "#8b8494", 0.95)
-white = pw.material("observatory_white", "#eeeef0", 0.45, 0.05)
-dark = pw.material("observatory_slit", "#1d2030", 0.6)
-glow = pw.material("fire_glow", "#ffb24a", 1.0, emission="#ff9a3a", emission_strength=6.0)
-beacon_mat = pw.material("beacon", "#ff5a4a", 1.0, emission="#ff4a3a", emission_strength=8.0)
-window_mat = pw.material("window_warm", "#ffd9a0", 1.0, emission="#ffc777", emission_strength=3.0)
+# --- camps ---------------------------------------------------------------------------------------------------------
+for name in SITES:
+    pw.empty(f"anchor_{name}", at(name, 0, 0))
 
-props = pw.collection("props")
+# Base camp: three tents round a campfire, a cooking corner, lantern, map and the first signpost.
+r0 = frame_rot("base")
+campfire(at("base", 1.6, 0.6), r0)
+a_frame_tent(at("base", -1.0, 2.9), r0 + 0.35, "fabric_orange", 1.1)
+a_frame_tent(at("base", 4.0, 2.8), r0 - 0.4, "fabric_yellow", 1.0)
+a_frame_tent(at("base", 4.6, -1.5), r0 - 1.7, "fabric_teal", 1.05)
+log_seat(at("base", 0.1, 0.2), r0 + 1.4)
+log_seat(at("base", 1.9, -0.9), r0 + 0.1)
+cooking_tripod(at("base", 2.6, 1.3), r0)
+backpack(at("base", -0.4, 1.4), r0 + 0.5, "fabric_red")
+backpack(at("base", 3.1, 1.9), r0 - 0.6, "fabric_blue")
+crates(at("base", -2.4, -0.6), r0 + 0.3)
+firewood(at("base", -2.5, 1.2), r0 + 1.2)
+picnic_table(at("base", -3.4, -3.4), r0 + 0.2)
+lantern_post(at("base", 0.6, -1.6), r0)
+map_board(at("base", -1.6, -4.6), r0 + 0.2)
+signpost(at("base", -1.3, -1.9), r0, [(math.pi / 2, 1.7), (math.pi / 2 + 0.6, 1.5), (-math.pi / 2, 1.3)])
+flag_pole(at("base", 5.6, 0.8), r0, "fabric_orange", 3.2)
 
+# Camp 1: forest edge, a dome tent and a canadian tent, bench and way-mark.
+r1 = frame_rot("camp_1")
+dome_tent(at("camp_1", -2.3, 0.9), r1 + 0.4, "fabric_green", 0.9)
+a_frame_tent(at("camp_1", 2.4, 1.3), r1 - 0.5, "fabric_orange", 0.95)
+bench(at("camp_1", -2.0, -1.8), r1 + math.pi * 0.95)
+backpack(at("camp_1", 1.3, -0.5), r1 + 0.8, "fabric_teal")
+campfire_ring = at("camp_1", -0.2, 2.6)
+for s in range(8):
+    a = s / 8 * math.tau
+    props.ico("stone", campfire_ring, r1, (math.cos(a) * 0.36, math.sin(a) * 0.36, 0.04), 0.09, (1.2, 1.0, 0.7))
+props.ico("wood_dark", campfire_ring, r1, (0, 0, 0.03), 0.18, (1.0, 1.0, 0.2))
+signpost(at("camp_1", 1.4, -2.0), r1, [(math.pi / 2, 1.7), (-math.pi / 2, 1.5)])
+cairn(at("camp_1", -1.3, 3.4), r1)
+flag_pole(at("camp_1", 3.4, -0.4), r1, "marker_red")
 
-def facing(name):
-    """Angle that points from a site towards the next one along the trail."""
-    idx = [r[0] for r in ROUTE].index(name)
-    a = ROUTE[idx]
-    b = ROUTE[min(idx + 1, len(ROUTE) - 1)] if idx < len(ROUTE) - 1 else ROUTE[idx - 1]
-    return math.atan2(b[2] - a[2], b[1] - a[1])
+# Camp 2: the mountain refuge, with lit windows and smoke, a fence and a water trough.
+r2 = frame_rot("camp_2")
+hut(at("camp_2", 4.4, 1.6), r2 - 0.2)
+dome_tent(at("camp_2", -2.8, 2.0), r2 + 0.3, "fabric_yellow", 0.85)
+firewood(at("camp_2", 2.0, 3.8), r2 - 0.2)
+trough = at("camp_2", -1.8, -1.3)
+props.box("wood_dark", trough, r2, (0, 0, 0.3), (1.2, 0.45, 0.35))
+props.box("lantern", trough, r2, (0, 0, 0.45), (1.05, 0.3, 0.02))
+props.cyl("metal", trough, r2, (0.5, 0.25, 0.3), (0.5, 0.25, 1.0), 0.03, seg=6)
+fence_line = [at("camp_2", -5.0 + i * 1.6, -3.4) for i in range(6)]
+railing([Vector((p.x, p.y, 0)) for p in fence_line])
+signpost(at("camp_2", 0.9, -2.1), r2, [(math.pi / 2, 1.7), (-math.pi / 2, 1.5), (math.pi, 1.3)])
+backpack(at("camp_2", 1.6, 0.6), r2 + 2.5, "fabric_orange")
+flag_pole(at("camp_2", -4.2, 0.4), r2, "fabric_blue")
 
+# Camp 3: moraine camp sheltered by stone windbreaks, with crates and a solar panel.
+r3 = frame_rot("camp_3")
+for (dx, dy, color, turn) in ((-2.6, 1.4, "fabric_red", 0.4), (2.7, 1.8, "fabric_yellow", -0.3)):
+    centre = at("camp_3", dx, dy)
+    dome_tent(centre, r3 + turn, color, 0.85)
+    stone_wall(centre, r3 + turn + math.pi / 2, radius=1.55, start=-1.6, end=1.6)
+crates(at("camp_3", 0.4, 3.4), r3)
+solar_stand(at("camp_3", -0.6, 3.6), r3 + math.pi)
+backpack(at("camp_3", 1.3, -0.4), r3 - 0.9, "fabric_green")
+cairn(at("camp_3", -1.4, -2.3), r3, 1.35)
+signpost(at("camp_3", 1.5, -2.2), r3, [(math.pi / 2, 1.7), (-math.pi / 2, 1.5)])
+flag_pole(at("camp_3", 4.0, -0.2), r3, "marker_red")
 
-def tent(bm_, origin, rot, size=1.0):
-    w, l, h = 0.75 * size, 1.0 * size, 0.6 * size
-    base = [Vector((-w / 2, -l / 2, 0)), Vector((w / 2, -l / 2, 0)), Vector((w / 2, l / 2, 0)), Vector((-w / 2, l / 2, 0))]
-    ridge = [Vector((0, -l / 2 - 0.08 * size, h)), Vector((0, l / 2 + 0.08 * size, h))]
-    rotm = pw._rot_z(rot)
-    vs = [bm_.verts.new(Vector(origin) + rotm @ p) for p in base + ridge]
-    bm_.faces.new((vs[0], vs[1], vs[4]))
-    bm_.faces.new((vs[1], vs[2], vs[5], vs[4]))
-    bm_.faces.new((vs[2], vs[3], vs[5]))
-    bm_.faces.new((vs[3], vs[0], vs[4], vs[5]))
-    return vs
+# Camp 4: high camp; tents tied down, ice axes, rope coils, a lantern for the night.
+r4 = frame_rot("camp_4")
+dome_tent(at("camp_4", -2.3, 1.2), r4 + 0.2, "fabric_yellow", 0.8)
+dome_tent(at("camp_4", 2.2, 1.8), r4 - 0.4, "fabric_red", 0.8)
+stone_wall(at("camp_4", 0.0, 3.2), r4 + math.pi / 2, radius=3.0, start=-0.7, end=0.7, rows=2, mat="stone_light")
+ice_axe(at("camp_4", 0.7, -0.6), r4 + 0.3)
+ice_axe(at("camp_4", 1.0, -0.9), r4 - 0.2)
+rope_coil(at("camp_4", -0.8, -0.8), r4)
+backpack(at("camp_4", -1.3, -0.3), r4 + 0.6, "fabric_blue")
+lantern_post(at("camp_4", 3.3, -0.6), r4)
+cairn(at("camp_4", -3.4, -1.6), r4)
+flag_pole(at("camp_4", 3.8, 1.0), r4, "fabric_orange")
 
+# Camp 5: last camp on the snow; snow wall, prayer flags and a radio mast.
+r5 = frame_rot("camp_5")
+dome_tent(at("camp_5", -2.0, 1.4), r5 + 0.3, "fabric_orange", 0.85)
+dome_tent(at("camp_5", 2.4, 1.0), r5 - 0.3, "fabric_teal", 0.8)
+stone_wall(at("camp_5", 0.2, 3.6), r5 + math.pi / 2, radius=3.4, start=-0.75, end=0.75, rows=3, mat="snow")
+ice_axe(at("camp_5", 0.6, -0.4), r5)
+rope_coil(at("camp_5", -0.6, -0.9), r5)
+radio_mast(at("camp_5", -3.6, -0.6), r5)
+pole_a = at("camp_5", -3.0, 2.8) + Vector((0, 0, 2.0))
+pole_b = at("camp_5", 3.3, 2.6) + Vector((0, 0, 2.0))
+props.cyl("metal", Vector((0, 0, 0)), 0.0, pole_a - Vector((0, 0, 2.0)), pole_a, 0.03, seg=6)
+props.cyl("metal", Vector((0, 0, 0)), 0.0, pole_b - Vector((0, 0, 2.0)), pole_b, 0.03, seg=6)
+prayer_flags(pole_a, pole_b, 14, 0.4)
+lantern_post(at("camp_5", 1.7, -1.4), r5)
 
-def flag(bm_, origin, rot):
-    pole = pw.add_cone(bm_, origin, 0.035, 0.03, 1.6, segments=5)
-    rotm = pw._rot_z(rot)
-    top = Vector(origin) + Vector((0, 0, 1.55))
-    a = bm_.verts.new(top)
-    b = bm_.verts.new(top + Vector((0, 0, -0.38)))
-    c = bm_.verts.new(top + rotm @ Vector((0.55, 0, -0.17)))
-    cloth = bm_.faces.new((a, b, c))
-    return pole, cloth
+# Ridge: viewing deck with railing, telescope, bench and a panorama board.
+rr = frame_rot("ridge")
+deck = at("ridge", 0, 0)
+props.box("wood_light", deck, rr, (0, 0, 0.12), (4.4, 2.6, 0.16))
+for x in (-2.0, 2.0):
+    for y in (-1.1, 1.1):
+        props.cyl("wood_dark", deck, rr, (x, y, -0.6), (x, y, 0.1), 0.06, seg=6)
+rail = [deck + Matrix.Rotation(rr, 3, "Z") @ Vector((x, 1.25, 0)) for x in (-2.1, -1.05, 0.0, 1.05, 2.1)]
+railing([Vector((p.x, p.y, 0)) for p in rail])
+telescope(deck + Matrix.Rotation(rr, 3, "Z") @ Vector((-1.1, 0.6, 0.2)), rr + math.pi)
+bench(deck + Matrix.Rotation(rr, 3, "Z") @ Vector((0.9, -0.2, 0.2)), rr)
+map_board(at("ridge", 2.9, -1.6), rr + 0.3)
+signpost(at("ridge", -2.8, -1.4), rr, [(math.pi / 2, 1.7), (-math.pi / 2, 1.5)])
 
-
-for name, sx, sy, _alt in ROUTE:
-    z = ground(sx, sy)
-    rot = facing(name)
-    pw.empty(f"anchor_{name}", (sx, sy, z), props)
-    if name == "summit":
-        continue
-    bm = bmesh.new()
-    tents = 3 if name == "base" else (0 if name == "ridge" else 1 + (stable_hash(name) % 2))
-    for k in range(tents):
-        off = pw._rot_z(rot) @ Vector((-1.6 + k * 1.5, -1.2 - (k % 2) * 0.9, 0))
-        tent(bm, (sx + off.x, sy + off.y, ground(sx + off.x, sy + off.y) + 0.02), rot + rng.uniform(-0.4, 0.4), 1.15 if name == "base" else 1.0)
-    if tents:
-        pw.bm_object(f"tents_{name}", bm, fabric[stable_hash(name) % 2], props)
-    else:
-        bm.free()
-
-    bm = bmesh.new()
-    off = pw._rot_z(rot) @ Vector((1.6, 0.6, 0))
-    pole_verts, cloth = flag(bm, (sx + off.x, sy + off.y, ground(sx + off.x, sy + off.y)), rot + 1.2)
-    cloth.material_index = 1
-    pw.bm_object(f"flag_{name}", bm, [pole_mat, flag_mat], props)
-
-    if name != "base":
-        bm = bmesh.new()
-        off = pw._rot_z(rot) @ Vector((0.4, 1.4, 0))
-        cz = ground(sx + off.x, sy + off.y)
-        for k, (r, dz) in enumerate(((0.38, 0.18), (0.28, 0.5), (0.2, 0.76), (0.13, 0.95))):
-            pw.add_ico(bm, (sx + off.x + rng.uniform(-0.05, 0.05), sy + off.y, cz + dz), r, 1, (1.0, 0.9, 0.6))
-        pw.bm_object(f"cairn_{name}", bm, stone, props)
-
-# base camp: campfire and a bench of logs
-bx, by = ROUTE[0][1], ROUTE[0][2]
-bz = ground(bx + 1.0, by + 1.4)
+# Summit: observatory with a railing, summit pillar, prayer flags and a dish.
+ox, oy = SITES["summit"]
+oz = surface(ox, oy)
+observatory = Kit("observatory")
+o = Vector((ox, oy, oz))
+observatory.cyl("observatory", o, 0.0, (0, 0, -0.6), (0, 0, 1.9), 2.3, seg=24)
+observatory.box("stone", o, 0.0, (0, 0, -0.35), (5.4, 5.4, 0.5))
 bm = bmesh.new()
-for k in range(7):
-    a = k / 7 * math.tau
-    pw.add_ico(bm, (bx + 1.0 + math.cos(a) * 0.42, by + 1.4 + math.sin(a) * 0.42, bz + 0.05), 0.11, 1, (1.2, 1.0, 0.7))
-pw.bm_object("fire_ring", bm, stone, props)
-bm = bmesh.new()
-pw.add_cone(bm, (0, 0, 0), 0.24, 0.0, 0.55, segments=6)
-fire = pw.bm_object("fire", bm, glow, props)
-fire.location = (bx + 1.0, by + 1.4, bz + 0.05)
-bm = bmesh.new()
-for k, a in enumerate((0.3, 2.4)):
-    c = Vector((bx + 1.0 + math.cos(a) * 1.15, by + 1.4 + math.sin(a) * 1.15, bz + 0.12))
-    verts_ = pw.add_cone(bm, (0, 0, 0), 0.13, 0.13, 1.1, segments=6)
-    from mathutils import Matrix
-    bmesh.ops.rotate(bm, verts=verts_, cent=(0, 0, 0), matrix=Matrix.Rotation(math.pi / 2, 3, "X"))
-    bmesh.ops.rotate(bm, verts=verts_, cent=(0, 0, 0), matrix=Matrix.Rotation(a + math.pi / 2, 3, "Z"))
-    bmesh.ops.translate(bm, verts=verts_, vec=c)
-pw.bm_object("logs", bm, wood, props)
-
-# ridge overlook: wooden deck and a viewer on a post
-rx, ry = ROUTE[6][1], ROUTE[6][2]
-rz = ground(rx, ry)
-bm = bmesh.new()
-pw.add_box(bm, (rx, ry, rz + 0.1), (3.2, 2.0, 0.2), facing("ridge"))
-pw.add_cone(bm, (rx - 0.9, ry - 0.5, rz + 0.2), 0.05, 0.05, 1.0, segments=6)
-pw.bm_object("deck", bm, wood, props)
-bm = bmesh.new()
-pw.add_box(bm, (rx - 0.9, ry - 0.5, rz + 1.25), (0.42, 0.22, 0.2), facing("ridge") + math.pi)
-pw.bm_object("viewer", bm, pole_mat, props)
-
-# summit observatory
-ox, oy = ROUTE[-1][1], ROUTE[-1][2]
-oz = ground(ox, oy)
-bm = bmesh.new()
-pw.add_cone(bm, (ox, oy, oz - 0.4), 2.3, 2.3, 2.3, segments=20)
-pw.bm_object("observatory_base", bm, white, props)
-bm = bmesh.new()
-res = bmesh.ops.create_uvsphere(bm, u_segments=24, v_segments=12, radius=2.45)
+bmesh.ops.create_uvsphere(bm, u_segments=28, v_segments=14, radius=2.45)
 bmesh.ops.delete(bm, geom=[v for v in bm.verts if v.co.z < -0.01], context="VERTS")
 bmesh.ops.translate(bm, verts=bm.verts[:], vec=Vector((ox, oy, oz + 1.9)))
-pw.bm_object("observatory_dome", bm, white, props, smooth=True)
-bm = bmesh.new()
-slit_rot = math.atan2(-(oy - ROUTE[6][2]), -(ox - ROUTE[6][1]))
-for k in range(5):
-    a = 0.15 + k * 0.28
-    c = Vector((ox, oy, oz + 1.9)) + pw._rot_z(slit_rot) @ Vector((math.cos(a) * 2.36, 0, math.sin(a) * 2.36))
-    pw.add_box(bm, c, (0.12, 0.62, 0.62), slit_rot)
-pw.bm_object("observatory_slit", bm, dark, props)
-bm = bmesh.new()
-door_dir = pw._rot_z(slit_rot + math.pi * 0.85) @ Vector((2.28, 0, 0))
-pw.add_box(bm, (ox + door_dir.x, oy + door_dir.y, oz + 0.55), (0.18, 0.75, 1.15), slit_rot + math.pi * 0.85)
-pw.bm_object("observatory_door", bm, window_mat, props)
+pw.bm_object("observatory_dome", bm, M["observatory"], smooth=True)
+slit_rot = math.atan2(-(oy - SITES["ridge"][1]), -(ox - SITES["ridge"][0]))
+for k in range(6):
+    a = 0.1 + k * 0.25
+    c = Vector((ox, oy, oz + 1.9)) + Matrix.Rotation(slit_rot, 3, "Z") @ Vector((math.cos(a) * 2.37, 0, math.sin(a) * 2.37))
+    observatory.box("dark", c, slit_rot, (0, 0, 0), (0.12, 0.62, 0.5))
+door_rot = slit_rot + math.pi * 0.85
+observatory.box("window", o, door_rot, (2.28, 0, 0.55), (0.18, 0.75, 1.15))
+observatory.box("metal_dark", o, door_rot, (2.3, 0, 1.18), (0.2, 0.95, 0.08))
+for k in range(4):
+    observatory.box("stone_light", o, door_rot, (2.7 + k * 0.3, 0, -0.45 + k * 0.12), (0.3, 1.0, 0.12))
+for a in range(0, 360, 30):
+    rad = math.radians(a)
+    if abs(((a - math.degrees(door_rot)) + 180) % 360 - 180) < 25:
+        continue
+    observatory.cyl("metal", o, 0.0, (math.cos(rad) * 2.85, math.sin(rad) * 2.85, -0.1), (math.cos(rad) * 2.85, math.sin(rad) * 2.85, 0.85), 0.03, seg=5)
+observatory.torus("metal", o, 0.0, (0, 0, 0.85), 2.85, 0.025, seg=48, ring=4)
+observatory.finish()
 bm = bmesh.new()
 pw.add_cone(bm, (ox - 2.8, oy + 1.2, oz - 0.3), 0.06, 0.03, 4.2, segments=5)
-pw.bm_object("antenna", bm, pole_mat, props)
+pw.bm_object("antenna", bm, M["metal"])
 bm = bmesh.new()
 pw.add_ico(bm, (0, 0, 0), 0.12, 1)
-beacon = pw.bm_object("beacon", bm, beacon_mat, props)
+beacon = pw.bm_object("beacon", bm, M["beacon"])
 beacon.location = (ox - 2.8, oy + 1.2, oz + 3.95)
+pillar = at("summit", -4.6, -1.2)
+props.box("white", pillar, 0.0, (0, 0, 0.55), (0.4, 0.4, 1.1))
+props.cyl("metal", pillar, 0.0, (0, 0, 1.1), (0, 0, 1.16), 0.12, seg=10)
+dish = at("summit", 3.6, 2.8)
+props.cyl("metal_dark", dish, 0.0, (0, 0, 0), (0, 0, 1.3), 0.05, seg=6)
+props.dome("white", dish, 0.0, (0, 0, 1.25), 0.55, squash=0.35, seg=12)
+flags_a = at("summit", -3.4, 2.6) + Vector((0, 0, 0.3))
+prayer_flags(Vector((ox, oy, oz + 4.1)), flags_a, 12, 0.6)
 
-pw.empty("water", (0.0, 0.0, WATER), props)
-pw.empty("anchor_lake", (LAKE[0], LAKE[1], WATER), props)
+props.finish(smooth=("fabric_blue",))
+
+pw.empty("water", (0.0, 0.0, WATER))
+pw.empty("anchor_lake", (LAKE[0], LAKE[1], WATER))
 
 pw.export_glb(args.out)

@@ -9,7 +9,7 @@
 // BLENDER_PATH overrides the Blender executable.
 
 import { spawnSync } from 'node:child_process';
-import { copyFileSync, existsSync, mkdirSync, statSync } from 'node:fs';
+import { copyFileSync, existsSync, mkdirSync, rmSync, statSync } from 'node:fs';
 import { dirname, join, resolve } from 'node:path';
 import { NodeIO } from '@gltf-transform/core';
 import { ALL_EXTENSIONS } from '@gltf-transform/extensions';
@@ -31,7 +31,7 @@ const ASSETS = [
     script: 'atlas_valley.py',
     out: 'public/models/atlas/valley.glb',
     budgetKB: 1600,
-    stripNormals: ['terrain', 'horizon'],
+    stripNormals: ['terrain', 'horizon', 'trail'],
   },
   {
     name: 'aeris-drone',
@@ -107,9 +107,11 @@ for (const asset of selected) {
   } else if (!skipBlender) {
     console.log(`\n[assets] ${asset.name}: building in Blender`);
     const started = Date.now();
+    // A stale export must never pass for a fresh one, and a Python error must fail the build.
+    rmSync(raw, { force: true });
     const result = spawnSync(
       BLENDER,
-      ['--background', '--factory-startup', '--python', join(ROOT, 'tools/blender', asset.script), '--', '--out', raw],
+      ['--background', '--factory-startup', '--python-exit-code', '1', '--python', join(ROOT, 'tools/blender', asset.script), '--', '--out', raw],
       { stdio: ['ignore', 'pipe', 'pipe'], encoding: 'utf8' },
     );
     const log = `${result.stdout ?? ''}${result.stderr ?? ''}`;
