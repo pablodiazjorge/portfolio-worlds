@@ -1,0 +1,143 @@
+@let t = site.t();
+@let x = t.atrium;
+@let p = site.portfolio();
+<div class="atrium" [class.has-stick]="touch()">
+  <div
+    class="input-layer"
+    [class.is-pointing]="pointerOverExhibit()"
+    tabindex="0"
+    role="application"
+    [attr.aria-label]="x.controls"
+    (pointerdown)="pointerDown($event)"
+    (pointermove)="pointerMove($event)"
+    (pointerup)="pointerUp($event)"
+    (pointercancel)="pointerUp($event)"
+    (wheel)="wheel($event)"
+  ></div>
+
+  <header class="brand">
+    <h1>{{ p.name }}</h1>
+    <p>{{ p.role }}</p>
+  </header>
+
+  <button type="button" class="guide-toggle" (click)="toggleGuide()" [attr.aria-expanded]="guideOpen()" aria-controls="atrium-guide">
+    {{ guideOpen() ? x.closeGuide : x.guide }}
+  </button>
+
+  <aside class="label-card" aria-live="polite">
+    @switch (exhibit()?.kind) {
+      @case ('project') {
+        @let project = p.projects[exhibit()!.index];
+        <article class="card" [attr.aria-labelledby]="'atrium-card-title'">
+          <img [src]="project.cover" alt="" width="960" height="540" />
+          <h2 id="atrium-card-title">{{ project.title }}</h2>
+          @if (project.year) {
+            <p class="card-meta">{{ project.year }}</p>
+          }
+          <p class="card-medium"><span>{{ x.medium }}</span> {{ project.tech.join(', ') }}</p>
+          <p class="card-text">{{ project.description }}</p>
+          <p class="card-links">
+            <a [href]="project.repo" target="_blank" rel="noopener noreferrer">{{ t.common.code }}<span class="sr-only">: {{ project.title }} {{ t.opensNewTab }}</span></a>
+            @if (project.demo) {
+              <a [href]="project.demo" target="_blank" rel="noopener noreferrer">{{ t.common.demo }}<span class="sr-only">: {{ project.title }} {{ t.opensNewTab }}</span></a>
+            }
+          </p>
+        </article>
+      }
+      @case ('experience') {
+        @let job = experience()[exhibit()!.index];
+        <article class="card" [attr.aria-labelledby]="'atrium-card-title'">
+          <p class="card-year">{{ job.startYear }}</p>
+          <h2 id="atrium-card-title">{{ job.role }}</h2>
+          <p class="card-meta">
+            <a [href]="job.companyUrl" target="_blank" rel="noopener noreferrer">{{ job.company }}<span class="sr-only"> {{ t.opensNewTab }}</span></a>,
+            {{ job.period }}
+          </p>
+          <p class="card-meta">{{ job.contract }}</p>
+          <p class="card-text">{{ job.description }}</p>
+          <p class="card-medium"><span>{{ x.medium }}</span> {{ job.tech.join(', ') }}</p>
+        </article>
+      }
+      @case ('about') {
+        <article class="card" [attr.aria-labelledby]="'atrium-card-title'">
+          <h2 id="atrium-card-title">{{ t.sections.about }}</h2>
+          @for (paragraph of p.about; track $index) {
+            <p class="card-text">{{ paragraph }}</p>
+          }
+          <p class="card-meta">{{ p.location }}</p>
+        </article>
+      }
+      @case ('contact') {
+        <article class="card" [attr.aria-labelledby]="'atrium-card-title'">
+          <h2 id="atrium-card-title">{{ t.sections.contact }}</h2>
+          <ul class="card-contact">
+            <li><a [href]="p.contact.linkedin" target="_blank" rel="noopener noreferrer">{{ t.common.linkedin }}<span class="sr-only"> {{ t.opensNewTab }}</span></a></li>
+            <li><a [href]="p.contact.github" target="_blank" rel="noopener noreferrer">{{ t.common.github }}<span class="sr-only"> {{ t.opensNewTab }}</span></a></li>
+            <li><a [href]="p.contact.cv" target="_blank" rel="noopener">{{ t.common.cv }}<span class="sr-only"> {{ t.opensNewTab }}</span></a></li>
+            <li><a [href]="site.classicUrl()" rel="noopener">{{ t.common.classic }}</a></li>
+          </ul>
+          <p class="card-meta">{{ t.common.builtWith }}</p>
+        </article>
+      }
+      @default {
+        @if (hintVisible()) {
+          <article class="card card-welcome">
+            <h2>{{ x.welcome }}</h2>
+            <p class="card-text">{{ x.welcomeLead }}</p>
+          </article>
+        }
+      }
+    }
+  </aside>
+
+  @if (touch()) {
+    <div class="stick">
+      <pw-joystick [label]="x.stick" (changed)="onStick($event)" />
+    </div>
+  }
+  @if (hintVisible()) {
+    <p class="hint">{{ touch() ? x.hintTouch : x.hint }}</p>
+  }
+
+  <nav id="atrium-guide" class="guide" [class.is-open]="guideOpen()" [attr.aria-label]="x.guide">
+    <section>
+      <h2>{{ x.rooms.lobby }}</h2>
+      <ul>
+        <li>
+          <h3>{{ t.sections.about }}</h3>
+          <p>{{ p.intro }}</p>
+          <button type="button" (click)="visit('about')">{{ x.goThere }}</button>
+        </li>
+        <li>
+          <h3>{{ t.sections.contact }}</h3>
+          <p>{{ t.common.linkedin }}, {{ t.common.github }}, {{ t.common.cv }}</p>
+          <button type="button" (click)="visit('contact')">{{ x.goThere }}</button>
+        </li>
+      </ul>
+    </section>
+    <section>
+      <h2>{{ x.rooms.wing }}</h2>
+      <ul>
+        @for (job of experience(); track job.id; let i = $index) {
+          <li>
+            <h3>{{ job.role }}, {{ job.company }}</h3>
+            <p>{{ job.period }}. {{ job.summary }}</p>
+            <button type="button" (click)="visit('experience-' + i)">{{ x.goThere }}</button>
+          </li>
+        }
+      </ul>
+    </section>
+    <section>
+      <h2>{{ x.rooms.hall }}</h2>
+      <ul>
+        @for (project of p.projects; track project.slug; let i = $index) {
+          <li>
+            <h3>{{ project.title }}</h3>
+            <p>{{ project.tagline }}</p>
+            <button type="button" (click)="visit('project-' + i)">{{ x.goThere }}</button>
+          </li>
+        }
+      </ul>
+    </section>
+  </nav>
+</div>

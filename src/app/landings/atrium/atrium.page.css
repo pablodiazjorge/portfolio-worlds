@@ -1,0 +1,346 @@
+:host {
+  --ink: #f4efe6;
+  --muted: rgb(240 232 218 / 0.78);
+  --soft: rgb(240 232 218 / 0.56);
+  --brass: #d2ad6c;
+  --line: rgb(210 173 108 / 0.35);
+  --panel: rgb(17 30 26 / 0.78);
+  display: block;
+  color: var(--ink);
+}
+
+.atrium {
+  position: fixed;
+  inset: 0;
+  overflow: hidden;
+}
+
+.input-layer {
+  position: absolute;
+  inset: 0;
+  z-index: 1;
+  cursor: grab;
+  touch-action: none;
+  outline: none;
+}
+
+.input-layer:active {
+  cursor: grabbing;
+}
+
+.input-layer.is-pointing {
+  cursor: pointer;
+}
+
+.input-layer:focus-visible {
+  box-shadow: inset 0 0 0 3px var(--brass);
+}
+
+.brand {
+  position: absolute;
+  top: clamp(1rem, 2.6vw, 2rem);
+  left: clamp(1rem, 2.6vw, 2.2rem);
+  z-index: 2;
+  pointer-events: none;
+  text-shadow: 0 2px 24px rgb(0 0 0 / 0.45);
+}
+
+.brand h1 {
+  margin: 0;
+  font-family: var(--font-atrium);
+  font-size: clamp(1.8rem, 3.4vw, 3rem);
+  font-weight: 500;
+  letter-spacing: -0.01em;
+  line-height: 1;
+}
+
+.brand p {
+  margin: 0.4rem 0 0;
+  color: var(--muted);
+  font-size: 0.95rem;
+}
+
+.guide-toggle {
+  position: absolute;
+  top: clamp(1rem, 2.6vw, 2rem);
+  right: clamp(1rem, 2.6vw, 2.2rem);
+  z-index: 4;
+  padding: 0.65rem 1.1rem;
+  border: 1px solid var(--line);
+  border-radius: 999px;
+  background: var(--panel);
+  color: var(--ink);
+  font: inherit;
+  font-size: 0.9rem;
+  font-weight: 600;
+  cursor: pointer;
+  backdrop-filter: blur(12px);
+  -webkit-backdrop-filter: blur(12px);
+}
+
+.guide-toggle:hover {
+  border-color: var(--brass);
+}
+
+/* wall label card ------------------------------------------------------------ */
+.label-card {
+  position: absolute;
+  top: 50%;
+  right: clamp(1rem, 2.6vw, 2.2rem);
+  z-index: 2;
+  width: min(25rem, calc(100% - 2rem));
+  max-height: calc(100dvh - 12rem);
+  transform: translateY(-50%);
+  pointer-events: none;
+}
+
+.card {
+  overflow: auto;
+  max-height: calc(100dvh - 12rem);
+  padding: 1.5rem 1.6rem;
+  border: 1px solid var(--line);
+  border-radius: 0.4rem;
+  background: var(--panel);
+  box-shadow: 0 30px 70px -40px rgb(0 0 0 / 0.8);
+  backdrop-filter: blur(16px);
+  -webkit-backdrop-filter: blur(16px);
+  pointer-events: auto;
+  animation: label-in 0.7s var(--ease-out-expo) both;
+}
+
+@keyframes label-in {
+  from {
+    opacity: 0;
+    transform: translateX(1.5rem);
+  }
+}
+
+.card img {
+  display: block;
+  width: 100%;
+  height: auto;
+  margin-bottom: 1rem;
+  border-radius: 0.2rem;
+}
+
+.card h2 {
+  margin: 0 0 0.35rem;
+  font-family: var(--font-atrium);
+  font-size: clamp(1.7rem, 2.4vw, 2.2rem);
+  font-weight: 600;
+  line-height: 1.05;
+}
+
+.card-year {
+  margin: 0 0 0.2rem;
+  color: var(--brass);
+  font-family: var(--font-atrium);
+  font-size: 2.4rem;
+  font-weight: 500;
+  line-height: 1;
+  font-variant-numeric: lining-nums tabular-nums;
+}
+
+.card-meta {
+  margin: 0 0 0.5rem;
+  color: var(--soft);
+  font-size: 0.875rem;
+}
+
+.card-medium {
+  margin: 0.4rem 0 0.8rem;
+  color: var(--muted);
+  font-size: 0.85rem;
+  line-height: 1.5;
+}
+
+.card-medium span {
+  color: var(--brass);
+  font-weight: 600;
+}
+
+.card-text {
+  margin: 0 0 0.8rem;
+  color: var(--muted);
+  font-size: 0.95rem;
+  line-height: 1.62;
+}
+
+.card a {
+  color: var(--ink);
+  font-weight: 650;
+  text-decoration-color: rgb(210 173 108 / 0.7);
+  text-underline-offset: 0.22em;
+}
+
+.card a:hover {
+  color: var(--brass);
+}
+
+.card-links {
+  display: flex;
+  gap: 1.2rem;
+  margin: 0.4rem 0 0;
+}
+
+.card-contact {
+  display: grid;
+  gap: 0.55rem;
+  margin: 0.9rem 0 1rem;
+  padding: 0;
+  list-style: none;
+  font-size: 1.05rem;
+}
+
+/* controls ------------------------------------------------------------------- */
+.hint {
+  position: absolute;
+  left: clamp(1rem, 2.6vw, 2.2rem);
+  bottom: calc(5.5rem + env(safe-area-inset-bottom));
+  z-index: 2;
+  max-width: 24rem;
+  margin: 0;
+  padding: 0.75rem 1rem;
+  border: 1px solid var(--line);
+  border-radius: 0.6rem;
+  background: var(--panel);
+  color: var(--muted);
+  font-size: 0.85rem;
+  line-height: 1.5;
+  pointer-events: none;
+  backdrop-filter: blur(12px);
+  -webkit-backdrop-filter: blur(12px);
+}
+
+.stick {
+  position: absolute;
+  left: 1.2rem;
+  bottom: calc(5.5rem + env(safe-area-inset-bottom));
+  z-index: 3;
+}
+
+.stick + .hint {
+  bottom: calc(15rem + env(safe-area-inset-bottom));
+}
+
+/* guide ---------------------------------------------------------------------- */
+.guide {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  overflow: hidden;
+  clip-path: inset(50%);
+  white-space: nowrap;
+}
+
+.guide.is-open {
+  top: 0;
+  right: 0;
+  bottom: 0;
+  z-index: 3;
+  width: min(26rem, 100%);
+  height: auto;
+  padding: 5.5rem 1.6rem 7rem;
+  overflow-y: auto;
+  clip-path: none;
+  white-space: normal;
+  border-left: 1px solid var(--line);
+  background: rgb(14 25 22 / 0.94);
+  box-sizing: border-box;
+  backdrop-filter: blur(16px);
+  -webkit-backdrop-filter: blur(16px);
+  animation: guide-in 0.5s var(--ease-out-expo) both;
+}
+
+@keyframes guide-in {
+  from {
+    transform: translateX(100%);
+  }
+}
+
+.guide h2 {
+  margin: 1.4rem 0 0.6rem;
+  color: var(--brass);
+  font-family: var(--font-atrium);
+  font-size: 1.5rem;
+  font-weight: 600;
+}
+
+.guide ul {
+  display: grid;
+  gap: 0.6rem;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.guide li {
+  padding: 0.8rem 0.9rem;
+  border: 1px solid rgb(210 173 108 / 0.18);
+  border-radius: 0.4rem;
+}
+
+.guide h3 {
+  margin: 0 0 0.25rem;
+  font-family: var(--font-atrium);
+  font-size: 1.2rem;
+  font-weight: 600;
+}
+
+.guide p {
+  margin: 0 0 0.6rem;
+  color: var(--muted);
+  font-size: 0.85rem;
+  line-height: 1.5;
+}
+
+.guide button {
+  padding: 0.4rem 0.8rem;
+  border: 1px solid var(--line);
+  border-radius: 999px;
+  background: transparent;
+  color: var(--ink);
+  font: inherit;
+  font-size: 0.82rem;
+  font-weight: 600;
+  cursor: pointer;
+}
+
+.guide button:hover {
+  border-color: var(--brass);
+  color: var(--brass);
+}
+
+@media (max-width: 48rem) {
+  .label-card {
+    top: auto;
+    right: 1rem;
+    bottom: calc(5.2rem + env(safe-area-inset-bottom));
+    left: 1rem;
+    width: auto;
+    transform: none;
+  }
+
+  .card {
+    max-height: 42dvh;
+    padding: 1.1rem 1.2rem;
+  }
+
+  .card img {
+    display: none;
+  }
+
+  .hint {
+    display: none;
+  }
+}
+
+/* with the touch stick in the bottom corner, the label card moves to the top */
+.atrium.has-stick .label-card {
+  top: 6.5rem;
+  bottom: auto;
+}
+
+.atrium.has-stick .card {
+  max-height: 38dvh;
+}
