@@ -41,6 +41,13 @@ const ASSETS = [
     keepNodes: true,
   },
   {
+    name: 'aeris-monitor',
+    script: 'aeris_monitor.py',
+    out: 'public/models/aeris/monitor.glb',
+    budgetKB: 400,
+    keepNodes: true,
+  },
+  {
     name: 'terra-house',
     script: 'terra_house.py',
     out: 'public/models/terra/house.glb',

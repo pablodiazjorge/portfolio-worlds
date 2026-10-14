@@ -28,7 +28,8 @@
             "styles": [
               "node_modules/@fontsource-variable/instrument-sans/index.css",
               "node_modules/@fontsource-variable/fraunces/index.css",
-              "node_modules/@fontsource-variable/unbounded/index.css",
+              "node_modules/@fontsource-variable/space-grotesk/index.css",
+              "node_modules/@fontsource/vt323/index.css",
               "node_modules/@fontsource-variable/syne/index.css",
               "node_modules/@fontsource-variable/cormorant-garamond/index.css",
               "node_modules/@fontsource/michroma/index.css",

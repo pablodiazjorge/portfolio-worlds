@@ -12,7 +12,7 @@
         }
       </ul>
       <p class="hero-intro">{{ p.intro }}</p>
-      <button type="button" class="cta" (click)="goTo(2)">{{ x.start }}</button>
+      <button type="button" class="cta" (click)="goTo(1)">{{ x.start }}</button>
     </div>
   </section>
 
@@ -32,8 +32,8 @@
   @for (job of p.experience; track job.id; let i = $index) {
     <section class="stage" [class.stage-left]="i % 2 === 0" [class.stage-right]="i % 2 === 1" data-anchor>
       <div class="stage-inner">
-        <article class="panel" #layerPanel pwReveal>
-          <p class="layer-index">{{ x.layer(i + 1, p.experience.length) }}</p>
+        <article class="panel" pwReveal>
+          <p class="waypoint">{{ x.waypoint(i + 1, p.experience.length) }}</p>
           <h3>{{ job.role }}</h3>
           <p class="org">
             <a [href]="job.companyUrl" target="_blank" rel="noopener noreferrer">{{ job.company }}<span class="sr-only"> {{ t.opensNewTab }}</span></a>
@@ -52,7 +52,7 @@
   }
 
   <section class="projects" aria-labelledby="aeris-projects">
-    <header class="projects-head" data-anchor>
+    <header class="projects-head" data-anchor data-free>
       <div class="projects-title" pwReveal>
         <h2 id="aeris-projects">{{ t.sections.projects }}</h2>
         <p class="prose">{{ x.projectsLead }}</p>
@@ -108,8 +108,3 @@
     </div>
   </section>
 </article>
-
-<svg class="callout" #callout aria-hidden="true" preserveAspectRatio="none">
-  <polyline points="0,0 0,0 0,0" />
-  <circle r="5" cx="0" cy="0" />
-</svg>

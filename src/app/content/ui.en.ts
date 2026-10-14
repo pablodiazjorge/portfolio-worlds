@@ -43,8 +43,8 @@ export const UI_EN = {
       'You made it to the top. If you want to talk about a role, a project or anything you saw on the way up, this is where to find me.',
   },
   aeris: {
-    start: 'Take it apart',
-    layer: (n: number, total: number) => `Layer ${n} of ${total}`,
+    start: 'Start the flight',
+    waypoint: (n: number, total: number) => `Waypoint ${n} of ${total}`,
     projectsLead: 'Everything I have shipped, newest first. Open any card for the full story and the stack.',
     contactLead: 'Reach me on LinkedIn or GitHub about a role, a project or an idea.',
   },
@@ -97,8 +97,8 @@ export const UI_EN = {
     },
     aeris: {
       name: 'Aeris',
-      tagline: 'A drone taken apart layer by layer, like a product launch.',
-      seo: 'Aeris: the portfolio of Pablo Díaz-Jorge as a product launch, with a drone that comes apart as you scroll.',
+      tagline: 'A holographic drone crossing a dark studio, past the computer where it all began.',
+      seo: 'Aeris: the portfolio of Pablo Díaz-Jorge as a holographic drone that flies from stop to stop across a dark studio.',
     },
     terra: {
       name: 'Terra',

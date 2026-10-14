@@ -3,7 +3,8 @@
 @theme {
   --font-sans: 'Instrument Sans Variable', ui-sans-serif, system-ui, sans-serif;
   --font-atlas: 'Fraunces Variable', 'Iowan Old Style', Georgia, serif;
-  --font-aeris: 'Unbounded Variable', 'Arial Black', ui-sans-serif, sans-serif;
+  --font-aeris: 'Space Grotesk Variable', 'Helvetica Neue', ui-sans-serif, sans-serif;
+  --font-terminal: 'VT323', 'Courier New', ui-monospace, monospace;
   --font-terra: 'Syne Variable', 'Arial Narrow', ui-sans-serif, sans-serif;
   --font-helios: 'Michroma', 'Eurostile', ui-sans-serif, sans-serif;
   --font-atrium: 'Cormorant Garamond Variable', Garamond, Georgia, serif;
@@ -28,13 +29,13 @@ html[data-world='atlas'] {
 }
 
 html[data-world='aeris'] {
-  --page-bg: #d9dce1;
-  --page-ink: #1d2026;
-  --dock-bg: rgb(250 251 252 / 0.62);
-  --dock-ink: #1d2026;
-  --dock-line: rgb(20 24 32 / 0.12);
-  --accent: #ff5a1f;
-  color-scheme: light;
+  --page-bg: #050810;
+  --page-ink: #e6eefb;
+  --dock-bg: rgb(8 12 24 / 0.6);
+  --dock-ink: #e6eefb;
+  --dock-line: rgb(120 200 255 / 0.18);
+  --accent: #5ee0ff;
+  color-scheme: dark;
 }
 
 html[data-world='terra'] {

@@ -1,14 +1,15 @@
-"""AERIS: a quadcopter built in five layers that the app pulls apart into an exploded view.
+"""AERIS: a heavy-lift quadcopter in the style of a concept render: a faceted hull with a
+raised canopy and a glowing spine, four boxy arms with light strips, motor pods with cooling
+rings and a glowing crown, and a tapered fin hanging under each pod as a landing leg. An
+eyebolt under the belly is where the chain that carries the monitor hooks in.
 
-Hierarchy (empties keep their names in the GLB; meshes may be renamed by the optimizer):
+Hierarchy (empties keep their names in the GLB):
   drone
-    layer_top      canopy, stripe, gps, antennas
-    layer_battery  battery pack and label
-    layer_board    flight controller, chips, heatsink
-    layer_frame    plate, arms, motors, skids, leds, spin_* pivots with props
-    layer_camera   gimbal_pivot with yoke, camera body, lens
-Materials are named so the app can swap in TSL materials: carbon, shell, accent, metal, pcb,
-chip, battery, prop, glass, led_white, led_red, rubber.
+    hull, canopy, arms, pods, fins, belly and the glow strips
+    spin_fl, spin_fr, spin_bl, spin_br   pivots with one propeller each, spun by the app
+    gimbal_pivot                         yoke, camera body and lens under the nose
+    hook                                 the chain's attachment point under the belly
+Materials: body, body_light, carbon, metal, metal_dark, glow, prop, glass, rubber.
 """
 
 import math
@@ -26,21 +27,20 @@ args = pw.parse_args()
 pw.reset(args.seed)
 
 M = {
-    "carbon": pw.material("carbon", "#1c1d21", 0.4),
-    "shell": pw.material("shell", "#2b2e34", 0.45),
-    "accent": pw.material("accent", "#ff5a1f", 0.4),
-    "metal": pw.material("metal", "#b8bcc4", 0.28, 1.0),
-    "pcb": pw.material("pcb", "#0f3b33", 0.55),
-    "chip": pw.material("chip", "#15161a", 0.5),
-    "battery": pw.material("battery", "#3a3d44", 0.6),
-    "prop": pw.material("prop", "#1c1f24", 0.35),
-    "glass": pw.material("glass", "#05070a", 0.05),
-    "led_white": pw.material("led_white", "#ffffff", 0.3, emission="#e8f4ff", emission_strength=6.0),
-    "led_red": pw.material("led_red", "#ff3b30", 0.3, emission="#ff2a1f", emission_strength=6.0),
-    "rubber": pw.material("rubber", "#111215", 0.9),
+    "body": pw.material("body", "#15171c", 0.35),
+    "body_light": pw.material("body_light", "#262a33", 0.4),
+    "carbon": pw.material("carbon", "#1a1c21", 0.4),
+    "metal": pw.material("metal", "#9aa0ab", 0.28, 1.0),
+    "metal_dark": pw.material("metal_dark", "#3a3e46", 0.4, 0.9),
+    "glow": pw.material("glow", "#5ee0ff", 0.3, emission="#5ee0ff", emission_strength=6.0),
+    "prop": pw.material("prop", "#0f1114", 0.3),
+    "glass": pw.material("glass", "#04060a", 0.05),
+    "rubber": pw.material("rubber", "#0e0f12", 0.9),
 }
 
-MOTORS = {"fl": (-1.0, 0.8), "fr": (1.0, 0.8), "bl": (-1.0, -0.8), "br": (1.0, -0.8)}
+# motor pods at the arm tips, (x, y) in the drone's plane; the nose points to +Y
+PODS = {"fl": (-0.95, 0.78), "fr": (0.95, 0.78), "bl": (-0.95, -0.78), "br": (0.95, -0.78)}
+SHOULDER = {"fl": (-0.22, 0.2), "fr": (0.22, 0.2), "bl": (-0.22, -0.24), "br": (0.22, -0.24)}
 
 
 def empty(name, parent=None, location=(0, 0, 0)):
@@ -51,160 +51,227 @@ def empty(name, parent=None, location=(0, 0, 0)):
 
 
 def part(name, bm, mat, parent, smooth=False):
-    obj = pw.bm_object(name, bm, M[mat] if isinstance(mat, str) else [M[m] for m in mat], smooth=smooth)
+    obj = pw.bm_object(name, bm, M[mat], smooth=smooth)
     obj.parent = parent
     return obj
 
 
-def bevel_all(bm, offset, segments=2):
+def bevel_all(bm, offset, segments=1):
     bmesh.ops.bevel(bm, geom=bm.edges[:], offset=offset, segments=segments, profile=0.5, affect="EDGES", clamp_overlap=True)
 
 
-def rounded_box(size, center=(0, 0, 0), bevel=0.02, segments=2, rotation=0.0):
+def rounded_box(size, center=(0, 0, 0), bevel=0.02, segments=1, rotation=0.0):
     bm = bmesh.new()
     pw.add_box(bm, center, size, rotation)
-    bevel_all(bm, bevel, segments)
+    if bevel > 0:
+        bevel_all(bm, bevel, segments)
     return bm
 
 
-root = empty("drone")
-layer_top = empty("layer_top", root)
-layer_battery = empty("layer_battery", root)
-layer_board = empty("layer_board", root)
-layer_frame = empty("layer_frame", root)
-layer_camera = empty("layer_camera", root)
+def ring(bm, center, major, minor, seg=24, sides=6, plane="XY"):
+    """A torus lying in `plane` through `center`."""
+    before = set(bm.verts)
+    circle = bmesh.ops.create_circle(bm, cap_ends=False, radius=minor, segments=sides)["verts"]
+    bmesh.ops.rotate(bm, verts=circle, cent=(0, 0, 0), matrix=Matrix.Rotation(math.pi / 2, 3, "X"))
+    bmesh.ops.translate(bm, verts=circle, vec=Vector((major, 0, 0)))
+    edges = list({e for v in circle for e in v.link_edges})
+    bmesh.ops.spin(bm, geom=circle + edges, cent=(0, 0, 0), axis=(0, 0, 1), angle=math.tau, steps=seg, use_duplicate=False)
+    vs = [v for v in bm.verts if v.is_valid and v not in before]
+    bmesh.ops.remove_doubles(bm, verts=vs, dist=1e-4)
+    vs = [v for v in bm.verts if v.is_valid and v not in before]
+    if plane == "XZ":
+        bmesh.ops.rotate(bm, verts=vs, cent=(0, 0, 0), matrix=Matrix.Rotation(math.pi / 2, 3, "X"))
+    elif plane == "YZ":
+        bmesh.ops.rotate(bm, verts=vs, cent=(0, 0, 0), matrix=Matrix.Rotation(math.pi / 2, 3, "Y"))
+    bmesh.ops.translate(bm, verts=vs, vec=Vector(center))
+    return vs
 
-# --- frame -----------------------------------------------------------------------------
-part("plate", rounded_box((0.92, 0.62, 0.04), (0, 0, 0.02), 0.015), "carbon", layer_frame)
-for key, (mx, my) in MOTORS.items():
-    angle = math.atan2(my, mx)
-    length = math.hypot(mx, my)
-    bm = rounded_box((length + 0.05, 0.12, 0.055), (0, 0, 0), 0.02, 2)
+
+def section(y, hw, h, zc):
+    """A faceted cross-section of the hull: a ridge on top, flat sides and a narrow belly."""
+    return [
+        (0.0, y, zc + h * 0.5),
+        (hw * 0.9, y, zc + h * 0.22),
+        (hw, y, zc - h * 0.05),
+        (hw * 0.82, y, zc - h * 0.36),
+        (hw * 0.35, y, zc - h * 0.5),
+        (-hw * 0.35, y, zc - h * 0.5),
+        (-hw * 0.82, y, zc - h * 0.36),
+        (-hw, y, zc - h * 0.05),
+        (-hw * 0.9, y, zc + h * 0.22),
+    ]
+
+
+def loft(bm, sections):
+    """Skins a run of cross-sections into one closed shell."""
+    rings = [[bm.verts.new(Vector(p)) for p in s] for s in sections]
+    n = len(rings[0])
+    for a, b in zip(rings, rings[1:]):
+        for i in range(n):
+            bm.faces.new((a[i], a[(i + 1) % n], b[(i + 1) % n], b[i]))
+    bm.faces.new(list(reversed(rings[0])))
+    bm.faces.new(rings[-1])
+    bmesh.ops.recalc_face_normals(bm, faces=bm.faces[:])
+
+
+root = empty("drone")
+
+# --- hull and canopy ---------------------------------------------------------------------------
+bm = bmesh.new()
+loft(bm, [
+    section(-0.58, 0.05, 0.08, 0.07),
+    section(-0.42, 0.13, 0.17, 0.08),
+    section(-0.16, 0.2, 0.25, 0.1),
+    section(0.12, 0.21, 0.25, 0.1),
+    section(0.36, 0.15, 0.18, 0.1),
+    section(0.55, 0.06, 0.08, 0.1),
+])
+part("hull", bm, "body", root)
+bm = bmesh.new()
+loft(bm, [
+    section(-0.32, 0.08, 0.03, 0.215),
+    section(-0.16, 0.17, 0.11, 0.225),
+    section(0.06, 0.17, 0.11, 0.225),
+    section(0.24, 0.07, 0.03, 0.21),
+])
+part("canopy", bm, "body_light", root)
+# the glowing spine and the slits along the canopy
+bm = bmesh.new()
+pw.add_box(bm, (0, -0.04, 0.277), (0.028, 0.42, 0.012))
+for sx in (-1, 1):
+    for y in (-0.2, -0.1, 0.0, 0.1):
+        pw.add_box(bm, (sx * 0.148, y, 0.248), (0.012, 0.05, 0.01))
+# intakes on the hull sides
+for sx in (-1, 1):
+    for y in (-0.3, -0.22, -0.14):
+        pw.add_box(bm, (sx * 0.192, y, 0.085), (0.012, 0.04, 0.025))
+part("glow_body", bm, "glow", root)
+# the eye on the nose: a glowing ring round a lens
+bm = bmesh.new()
+ring(bm, (0, 0.553, 0.1), 0.042, 0.007, seg=24, sides=6, plane="XZ")
+part("glow_eye", bm, "glow", root, smooth=True)
+bm = bmesh.new()
+verts = pw.add_cone(bm, (0, 0, 0), 0.034, 0.034, 0.02, segments=20)
+bmesh.ops.rotate(bm, verts=verts, cent=(0, 0, 0), matrix=Matrix.Rotation(-math.pi / 2, 3, "X"))
+bmesh.ops.translate(bm, verts=verts, vec=Vector((0, 0.56, 0.1)))
+part("eye_lens", bm, "glass", root, smooth=True)
+# two antenna blades on the tail
+bm = bmesh.new()
+for sx in (-0.07, 0.07):
+    fin = bmesh.ops.create_cube(bm, size=1.0)["verts"]
+    bmesh.ops.scale(bm, vec=Vector((0.01, 0.16, 0.1)), verts=fin)
+    for v in fin:
+        if v.co.z > 0:
+            v.co.y -= 0.06
+    bmesh.ops.translate(bm, verts=fin, vec=Vector((sx, -0.46, 0.17)))
+part("tail_fins", bm, "body_light", root)
+
+# --- belly, winch and the hook for the chain ----------------------------------------------------
+part("belly", rounded_box((0.26, 0.52, 0.03), (0, -0.02, -0.035), 0.008), "metal_dark", root)
+part("winch", rounded_box((0.14, 0.14, 0.08), (0, -0.02, -0.08), 0.012), "metal", root)
+bm = bmesh.new()
+pw.add_cone(bm, (0, -0.02, -0.15), 0.012, 0.012, 0.04, segments=10)
+ring(bm, (0, -0.02, -0.175), 0.028, 0.007, seg=20, sides=6, plane="XZ")
+part("eyebolt", bm, "metal", root, smooth=True)
+empty("hook", root, (0, -0.02, -0.175))
+
+# --- arms, pods, fins and propellers ------------------------------------------------------------
+for key, (px, py) in PODS.items():
+    sx, sy = SHOULDER[key]
+    dx, dy = px - sx, py - sy
+    length = math.hypot(dx, dy)
+    angle = math.atan2(dy, dx)
+    outward = Vector((math.cos(angle), math.sin(angle), 0))
+    part(f"shoulder_{key}", rounded_box((0.18, 0.15, 0.13), (sx, sy, 0.03), 0.02, 1, angle), "body_light", root)
+    bm = rounded_box((length + 0.08, 0.13, 0.085), (0, 0, 0), 0.018)
     bmesh.ops.translate(bm, verts=bm.verts[:], vec=Vector((length / 2, 0, 0.03)))
     bmesh.ops.rotate(bm, verts=bm.verts[:], cent=(0, 0, 0), matrix=Matrix.Rotation(angle, 3, "Z"))
-    part(f"arm_{key}", bm, "carbon", layer_frame)
+    bmesh.ops.translate(bm, verts=bm.verts[:], vec=Vector((sx, sy, 0)))
+    part(f"arm_{key}", bm, "carbon", root)
+    # light strips along the top and both sides of the arm
+    bm = bmesh.new()
+    pw.add_box(bm, (length * 0.52, 0, 0.074), (length * 0.62, 0.03, 0.01))
+    for side in (-1, 1):
+        pw.add_box(bm, (length * 0.55, side * 0.066, 0.02), (length * 0.5, 0.008, 0.028))
+    bmesh.ops.rotate(bm, verts=bm.verts[:], cent=(0, 0, 0), matrix=Matrix.Rotation(angle, 3, "Z"))
+    bmesh.ops.translate(bm, verts=bm.verts[:], vec=Vector((sx, sy, 0)))
+    part(f"glow_arm_{key}", bm, "glow", root)
 
-    # motor: stator base, bell and orange cap
+    # the motor pod: housing with cooling rings, a cap and a glowing crown
     bm = bmesh.new()
-    pw.add_cone(bm, (mx, my, 0.055), 0.12, 0.12, 0.05, segments=24)
-    part(f"motor_base_{key}", bm, "metal", layer_frame, smooth=True)
+    pw.add_cone(bm, (px, py, 0.02), 0.14, 0.13, 0.19, segments=24)
+    part(f"motor_{key}", bm, "metal_dark", root, smooth=True)
     bm = bmesh.new()
-    pw.add_cone(bm, (mx, my, 0.105), 0.145, 0.135, 0.11, segments=32)
-    bevel_all(bm, 0.008, 1)
-    part(f"motor_bell_{key}", bm, "metal", layer_frame, smooth=True)
+    for z in (0.07, 0.11, 0.15):
+        ring(bm, (px, py, z), 0.138, 0.007, seg=24, sides=5)
+    pw.add_cone(bm, (px, py, 0.21), 0.1, 0.085, 0.035, segments=20)
+    part(f"motor_rings_{key}", bm, "metal_dark", root, smooth=True)
     bm = bmesh.new()
-    pw.add_cone(bm, (mx, my, 0.215), 0.09, 0.07, 0.025, segments=24)
-    part(f"motor_cap_{key}", bm, "accent", layer_frame, smooth=True)
+    ring(bm, (px, py, 0.212), 0.118, 0.006, seg=24, sides=5)
+    part(f"glow_crown_{key}", bm, "glow", root, smooth=True)
 
-    # led under the arm tip
-    bm = rounded_box((0.07, 0.03, 0.02), (mx * 0.86, my * 0.86, 0.0), 0.006, 1, angle)
-    part(f"led_{key}", bm, "led_white" if my > 0 else "led_red", layer_frame)
+    # the fin under the pod: a tapered wedge leaning outward, the landing leg
+    bm = bmesh.new()
+    fin = bmesh.ops.create_cube(bm, size=1.0)["verts"]
+    for v in fin:
+        t = 0.5 - v.co.z  # 0 at the top, 1 at the bottom
+        v.co.x *= 0.22 - 0.15 * t
+        v.co.y *= 0.16 - 0.11 * t
+        v.co.z = 0.03 - t * 0.46
+    bmesh.ops.rotate(bm, verts=fin, cent=(0, 0, 0.03), matrix=Matrix.Rotation(math.radians(-11), 3, "Y"))
+    bmesh.ops.rotate(bm, verts=fin, cent=(0, 0, 0), matrix=Matrix.Rotation(angle, 3, "Z"))
+    bmesh.ops.translate(bm, verts=fin, vec=Vector((px, py, 0)))
+    bevel_all(bm, 0.01, 1)
+    part(f"fin_{key}", bm, "body", root)
+    # a glowing panel on the fin's outer face and a pad at its tip
+    bm = bmesh.new()
+    panel = pw.add_box(bm, (0.085, 0, -0.14), (0.012, 0.05, 0.16))
+    bmesh.ops.rotate(bm, verts=panel, cent=(0, 0, 0.03), matrix=Matrix.Rotation(math.radians(-11), 3, "Y"))
+    bmesh.ops.rotate(bm, verts=panel, cent=(0, 0, 0), matrix=Matrix.Rotation(angle, 3, "Z"))
+    bmesh.ops.translate(bm, verts=panel, vec=Vector((px, py, 0)))
+    part(f"glow_fin_{key}", bm, "glow", root)
+    bm = bmesh.new()
+    pad = pw.add_box(bm, (0.0, 0, -0.44), (0.075, 0.06, 0.03))
+    bmesh.ops.rotate(bm, verts=pad, cent=(0, 0, 0.03), matrix=Matrix.Rotation(math.radians(-11), 3, "Y"))
+    bmesh.ops.rotate(bm, verts=pad, cent=(0, 0, 0), matrix=Matrix.Rotation(angle, 3, "Z"))
+    bmesh.ops.translate(bm, verts=pad, vec=Vector((px, py, 0)))
+    part(f"pad_{key}", bm, "rubber", root)
 
     # propeller on its own pivot so the app can spin it
-    pivot = empty(f"spin_{key}", layer_frame, (mx, my, 0.245))
+    pivot = empty(f"spin_{key}", root, (px, py, 0.25))
     direction = 1 if key in ("fl", "br") else -1
     bm = bmesh.new()
-    pw.add_cone(bm, (0, 0, -0.012), 0.045, 0.035, 0.035, segments=16)
+    pw.add_cone(bm, (0, 0, -0.01), 0.045, 0.038, 0.035, segments=16)
     for side in (0, 1):
         blade = bmesh.ops.create_cube(bm, size=1.0)["verts"]
-        bmesh.ops.scale(bm, vec=Vector((0.6, 0.085, 0.012)), verts=blade)
-        bmesh.ops.translate(bm, verts=blade, vec=Vector((0.34, 0, 0.004)))
+        bmesh.ops.scale(bm, vec=Vector((0.64, 0.075, 0.01)), verts=blade)
+        bmesh.ops.translate(bm, verts=blade, vec=Vector((0.36, 0, 0.004)))
         for v in blade:
             r = max(0.0, v.co.x)
-            twist = direction * (0.38 - r * 0.42)
+            twist = direction * (0.36 - r * 0.4)
             v.co.y, v.co.z = v.co.y * math.cos(twist) - v.co.z * math.sin(twist), v.co.y * math.sin(twist) + v.co.z * math.cos(twist)
-            v.co.y *= 1.0 - 0.45 * (r / 0.64) ** 2
+            v.co.y *= 1.0 - 0.5 * (r / 0.68) ** 2
+            v.co.y -= 0.05 * (r / 0.68) ** 2  # swept back
         bmesh.ops.rotate(bm, verts=blade, cent=(0, 0, 0), matrix=Matrix.Rotation(side * math.pi, 3, "Z"))
     part(f"prop_{key}", bm, "prop", pivot)
 
-# skids
-for sx in (-0.34, 0.34):
-    bm = bmesh.new()
-    pw.add_cone(bm, (0, 0, 0), 0.014, 0.014, 0.9, segments=10)
-    bmesh.ops.rotate(bm, verts=bm.verts[:], cent=(0, 0, 0), matrix=Matrix.Rotation(math.pi / 2, 3, "X"))
-    bmesh.ops.translate(bm, verts=bm.verts[:], vec=Vector((sx * 1.15, 0.45, -0.3)))
-    for sy in (-0.22, 0.22):
-        pw.add_cone(bm, (sx * 1.05, sy, -0.3), 0.012, 0.012, 0.3, segments=8)
-    part(f"skid_{'l' if sx < 0 else 'r'}", bm, "rubber", layer_frame, smooth=True)
-
-# --- flight controller board ----------------------------------------------------------------
-part("board", rounded_box((0.62, 0.46, 0.022), (0, 0, 0.09), 0.006, 1), "pcb", layer_board)
+# --- camera and gimbal under the nose ----------------------------------------------------------
+gimbal = empty("gimbal_pivot", root, (0, 0.34, -0.04))
 bm = bmesh.new()
-for (cx, cy, sx, sy) in ((0.0, 0.05, 0.16, 0.16), (-0.18, -0.12, 0.08, 0.06), (0.17, -0.12, 0.1, 0.05), (-0.2, 0.14, 0.06, 0.06), (0.2, 0.15, 0.07, 0.04)):
-    pw.add_box(bm, (cx, cy, 0.112), (sx, sy, 0.025))
-part("chips", bm, "chip", layer_board)
-bm = bmesh.new()
-for k in range(7):
-    pw.add_box(bm, (-0.06 + k * 0.02, -0.02, 0.15), (0.008, 0.18, 0.06))
-pw.add_box(bm, (0.0, -0.02, 0.117), (0.15, 0.2, 0.012))
-part("heatsink", bm, "metal", layer_board)
-bm = bmesh.new()
-for (cx, cy) in ((0.24, -0.02), (0.24, 0.05), (-0.25, 0.02)):
-    pw.add_cone(bm, (cx, cy, 0.1), 0.022, 0.022, 0.05, segments=12)
-part("capacitors", bm, "battery", layer_board, smooth=True)
-
-# --- battery ------------------------------------------------------------------------------------
-part("battery_pack", rounded_box((0.68, 0.34, 0.15), (0, -0.02, 0.21), 0.035, 3), "battery", layer_battery, smooth=False)
-part("battery_label", rounded_box((0.69, 0.345, 0.04), (0, -0.02, 0.215), 0.012, 2), "accent", layer_battery)
-bm = bmesh.new()
-pw.add_box(bm, (0.36, -0.02, 0.2), (0.05, 0.12, 0.06))
-part("battery_plug", bm, "chip", layer_battery)
-
-# --- canopy ----------------------------------------------------------------------------------------
-bm = bmesh.new()
-bmesh.ops.create_uvsphere(bm, u_segments=48, v_segments=24, radius=1.0)
-bmesh.ops.delete(bm, geom=[v for v in bm.verts if v.co.z < -0.05], context="VERTS")
-for v in bm.verts:
-    v.co.x *= 0.6
-    v.co.y *= 0.44
-    v.co.z = max(v.co.z, 0.0) * 0.22
-    # sloped nose
-    if v.co.y > 0.2:
-        v.co.z *= 1.0 - (v.co.y - 0.2) * 1.2
-bmesh.ops.translate(bm, verts=bm.verts[:], vec=Vector((0, -0.01, 0.2)))
-part("canopy", bm, "shell", layer_top, smooth=True)
-bm = bmesh.new()
-bmesh.ops.create_uvsphere(bm, u_segments=48, v_segments=24, radius=1.0)
-bmesh.ops.delete(bm, geom=[v for v in bm.verts if v.co.z < -0.05 or abs(v.co.x) > 0.16], context="VERTS")
-for v in bm.verts:
-    v.co.x *= 0.6
-    v.co.y *= 0.445
-    v.co.z = max(v.co.z, 0.0) * 0.225
-    if v.co.y > 0.2:
-        v.co.z *= 1.0 - (v.co.y - 0.2) * 1.2
-bmesh.ops.translate(bm, verts=bm.verts[:], vec=Vector((0, -0.01, 0.201)))
-part("stripe", bm, "accent", layer_top, smooth=True)
-bm = bmesh.new()
-pw.add_cone(bm, (0, -0.16, 0.405), 0.075, 0.07, 0.03, segments=24)
-part("gps", bm, "shell", layer_top, smooth=True)
-bm = bmesh.new()
-for sx in (-0.18, 0.18):
-    verts = pw.add_cone(bm, (0, 0, 0), 0.009, 0.006, 0.22, segments=8)
-    bmesh.ops.rotate(bm, verts=verts, cent=(0, 0, 0), matrix=Matrix.Rotation(-0.5, 3, "X"))
-    bmesh.ops.translate(bm, verts=verts, vec=Vector((sx, -0.3, 0.3)))
-part("antennas", bm, "rubber", layer_top, smooth=True)
-bm = bmesh.new()
-pw.add_box(bm, (0, 0.33, 0.27), (0.22, 0.02, 0.04))
-part("front_sensor", bm, "glass", layer_top)
-
-# --- camera and gimbal ----------------------------------------------------------------------------------
-gimbal = empty("gimbal_pivot", layer_camera, (0, 0.36, -0.12))
-bm = bmesh.new()
-pw.add_box(bm, (0, 0, 0.06), (0.24, 0.06, 0.02))
-pw.add_box(bm, (-0.125, 0, -0.03), (0.02, 0.05, 0.18))
-pw.add_box(bm, (0.125, 0, -0.03), (0.02, 0.05, 0.18))
-pw.add_cone(bm, (0, 0, 0.07), 0.035, 0.035, 0.08, segments=16)
+pw.add_box(bm, (0, 0, 0.03), (0.16, 0.05, 0.015))
+pw.add_box(bm, (-0.085, 0, -0.03), (0.015, 0.04, 0.12))
+pw.add_box(bm, (0.085, 0, -0.03), (0.015, 0.04, 0.12))
 part("gimbal_yoke", bm, "metal", gimbal)
-part("camera_body", rounded_box((0.2, 0.16, 0.15), (0, 0, -0.06), 0.03, 3), "shell", gimbal, smooth=False)
+part("camera_body", rounded_box((0.13, 0.11, 0.1), (0, 0, -0.05), 0.02, 2), "body_light", gimbal)
 bm = bmesh.new()
-verts = pw.add_cone(bm, (0, 0, 0), 0.06, 0.055, 0.06, segments=32)
+verts = pw.add_cone(bm, (0, 0, 0), 0.04, 0.036, 0.05, segments=20)
 bmesh.ops.rotate(bm, verts=verts, cent=(0, 0, 0), matrix=Matrix.Rotation(-math.pi / 2, 3, "X"))
-bmesh.ops.translate(bm, verts=verts, vec=Vector((0, 0.08, -0.06)))
+bmesh.ops.translate(bm, verts=verts, vec=Vector((0, 0.055, -0.05)))
 part("lens_ring", bm, "metal", gimbal, smooth=True)
 bm = bmesh.new()
-verts = pw.add_cone(bm, (0, 0, 0), 0.045, 0.045, 0.01, segments=32)
+verts = pw.add_cone(bm, (0, 0, 0), 0.03, 0.03, 0.01, segments=20)
 bmesh.ops.rotate(bm, verts=verts, cent=(0, 0, 0), matrix=Matrix.Rotation(-math.pi / 2, 3, "X"))
-bmesh.ops.translate(bm, verts=verts, vec=Vector((0, 0.141, -0.06)))
+bmesh.ops.translate(bm, verts=verts, vec=Vector((0, 0.1, -0.05)))
 part("lens_glass", bm, "glass", gimbal, smooth=True)
 
 pw.export_glb(args.out)

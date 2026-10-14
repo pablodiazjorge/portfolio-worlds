@@ -45,8 +45,8 @@ export const UI_ES: UiDict = {
       'Has llegado arriba. Si quieres hablar de un puesto, de un proyecto o de cualquier cosa que hayas visto en la subida, aquí me encuentras.',
   },
   aeris: {
-    start: 'Desmóntalo',
-    layer: (n: number, total: number) => `Capa ${n} de ${total}`,
+    start: 'Iniciar el vuelo',
+    waypoint: (n: number, total: number) => `Punto ${n} de ${total}`,
     projectsLead: 'Todo lo que he publicado, de lo más reciente a lo más antiguo. Abre cualquier tarjeta para ver la historia completa y las tecnologías.',
     contactLead: 'Escríbeme por LinkedIn o GitHub sobre un puesto, un proyecto o una idea.',
   },
@@ -99,8 +99,8 @@ export const UI_ES: UiDict = {
     },
     aeris: {
       name: 'Aeris',
-      tagline: 'Un dron desmontado capa a capa, como el lanzamiento de un producto.',
-      seo: 'Aeris: el portfolio de Pablo Díaz-Jorge como el lanzamiento de un producto, con un dron que se despieza al desplazarte.',
+      tagline: 'Un dron holográfico que cruza un estudio oscuro, junto al ordenador donde empezó todo.',
+      seo: 'Aeris: el portfolio de Pablo Díaz-Jorge como un dron holográfico que vuela de parada en parada por un estudio oscuro.',
     },
     terra: {
       name: 'Terra',

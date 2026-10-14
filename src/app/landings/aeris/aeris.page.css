@@ -1,11 +1,11 @@
 :host {
-  --ink: #16181d;
-  --muted: #555b66;
-  --soft: #7b818c;
-  --line: rgb(22 24 29 / 0.12);
-  --panel: rgb(255 255 255 / 0.72);
-  --signal: #ff5a1f;
-  --signal-ink: #b93a0a;
+  --ink: #e6eefb;
+  --muted: rgb(230 238 251 / 0.72);
+  --soft: rgb(230 238 251 / 0.5);
+  --line: rgb(140 210 255 / 0.16);
+  --panel: rgb(8 12 24 / 0.62);
+  --signal: #5ee0ff;
+  --signal-ink: #9deaff;
   display: block;
   color: var(--ink);
 }
@@ -26,17 +26,18 @@
 .hero-name {
   margin: 0;
   font-family: var(--font-aeris);
-  font-size: clamp(3rem, 7.6vw, 7.4rem);
-  font-weight: 750;
-  letter-spacing: -0.055em;
-  line-height: 0.9;
+  font-size: clamp(3rem, 7.4vw, 7.2rem);
+  font-weight: 300;
+  letter-spacing: -0.025em;
+  line-height: 0.95;
+  text-shadow: 0 0 32px rgb(94 224 255 / 0.22);
   animation: aeris-rise 1.4s var(--ease-out-expo) both;
 }
 
 .hero-role {
   margin: 1.6rem 0 0;
   font-size: clamp(1.1rem, 1.5vw, 1.3rem);
-  font-weight: 600;
+  font-weight: 500;
   animation: aeris-rise 1.4s 0.1s var(--ease-out-expo) both;
 }
 
@@ -52,8 +53,10 @@
 
 .spec-strip li {
   padding: 0.7rem 1.2rem 0.7rem 0;
-  font-size: 0.95rem;
-  font-weight: 550;
+  color: var(--signal-ink);
+  font-family: var(--font-terminal);
+  font-size: 1.1rem;
+  letter-spacing: 0.02em;
 }
 
 .spec-strip li + li {
@@ -72,22 +75,24 @@
 
 .cta {
   padding: 0.85rem 1.6rem;
-  border: 0;
+  border: 1px solid rgb(94 224 255 / 0.55);
   border-radius: 999px;
-  background: var(--ink);
-  color: #fff;
+  background: rgb(94 224 255 / 0.1);
+  color: #dff6ff;
   font: inherit;
   font-size: 0.95rem;
   font-weight: 600;
   cursor: pointer;
   transition:
     background-color 0.25s ease-out,
+    box-shadow 0.25s ease-out,
     transform 0.5s var(--ease-out-expo);
   animation: aeris-rise 1.4s 0.34s var(--ease-out-expo) both;
 }
 
 .cta:hover {
-  background: var(--signal-ink);
+  background: rgb(94 224 255 / 0.22);
+  box-shadow: 0 0 28px rgb(94 224 255 / 0.25);
   transform: translateY(-2px);
 }
 
@@ -111,6 +116,12 @@
   height: 100svh;
   padding: 2rem clamp(1.25rem, 5vw, 5rem) 6rem;
   box-sizing: border-box;
+  /* a screen-sized layer: only its card takes the pointer, never the empty space around it */
+  pointer-events: none;
+}
+
+.stage-inner > * {
+  pointer-events: auto;
 }
 
 .stage-left .stage-inner {
@@ -124,16 +135,17 @@
 .panel {
   width: min(29rem, 100%);
   padding: clamp(1.4rem, 2.4vw, 2.1rem);
-  border: 1px solid rgb(255 255 255 / 0.7);
+  border: 1px solid var(--line);
   border-radius: 1.6rem;
   background: var(--panel);
-  backdrop-filter: blur(22px) saturate(1.4);
-  -webkit-backdrop-filter: blur(22px) saturate(1.4);
-  box-shadow: 0 24px 60px -30px rgb(30 34 44 / 0.35);
+  backdrop-filter: blur(22px) saturate(1.3);
+  -webkit-backdrop-filter: blur(22px) saturate(1.3);
+  box-shadow:
+    0 24px 60px -30px rgb(0 0 0 / 0.8),
+    inset 0 1px 0 rgb(255 255 255 / 0.06);
   box-sizing: border-box;
-  transition:
-    opacity 0.9s var(--ease-out-quart),
-    transform 1.1s var(--ease-out-expo);
+  /* the opacity is driven frame by frame by the cross-fade, so only the rise is animated */
+  transition: transform 1.1s var(--ease-out-expo);
 }
 
 html.js .panel[data-reveal]:not(.is-revealed) {
@@ -145,8 +157,8 @@ html.js .panel[data-reveal]:not(.is-revealed) {
   margin: 0 0 1rem;
   font-family: var(--font-aeris);
   font-size: clamp(2rem, 3.4vw, 2.9rem);
-  font-weight: 700;
-  letter-spacing: -0.05em;
+  font-weight: 400;
+  letter-spacing: -0.03em;
   line-height: 1;
 }
 
@@ -154,28 +166,21 @@ html.js .panel[data-reveal]:not(.is-revealed) {
   margin: 0 0 0.6rem;
   font-family: var(--font-aeris);
   font-size: clamp(1.35rem, 2vw, 1.7rem);
-  font-weight: 650;
-  letter-spacing: -0.04em;
-  line-height: 1.08;
+  font-weight: 500;
+  letter-spacing: -0.025em;
+  line-height: 1.1;
 }
 
-.layer-index {
-  display: inline-flex;
-  align-items: center;
-  gap: 0.5rem;
+.waypoint {
   margin: 0 0 0.9rem;
-  color: var(--signal-ink);
-  font-size: 0.85rem;
-  font-weight: 650;
-  font-variant-numeric: tabular-nums;
+  color: var(--signal);
+  font-family: var(--font-terminal);
+  font-size: 1.15rem;
+  letter-spacing: 0.02em;
 }
 
-.layer-index::before {
-  content: '';
-  width: 0.55rem;
-  height: 0.55rem;
-  border-radius: 50%;
-  background: var(--signal);
+.waypoint::before {
+  content: '> ';
 }
 
 .prose {
@@ -205,17 +210,17 @@ html.js .panel[data-reveal]:not(.is-revealed) {
 
 .org a {
   color: var(--ink);
-  font-weight: 650;
+  font-weight: 600;
 }
 
 a {
-  text-decoration-color: rgb(255 90 31 / 0.55);
+  text-decoration-color: rgb(94 224 255 / 0.5);
   text-decoration-thickness: 1px;
   text-underline-offset: 0.22em;
 }
 
 a:hover {
-  color: var(--signal-ink);
+  color: var(--signal);
 }
 
 .tags {
@@ -230,8 +235,8 @@ a:hover {
 .tags li {
   padding: 0.28rem 0.6rem;
   border-radius: 0.5rem;
-  background: rgb(22 24 29 / 0.06);
-  color: #2e333b;
+  background: rgb(140 210 255 / 0.1);
+  color: #cfe6ff;
   font-size: 0.78rem;
   font-weight: 500;
 }
@@ -256,6 +261,8 @@ a:hover {
 
 .projects-title h2 {
   font-size: clamp(3rem, 7vw, 6rem);
+  font-weight: 300;
+  text-shadow: 0 0 32px rgb(94 224 255 / 0.2);
 }
 
 .grid {
@@ -272,12 +279,12 @@ a:hover {
   display: grid;
   grid-template-rows: auto 1fr;
   overflow: hidden;
-  border: 1px solid rgb(255 255 255 / 0.8);
+  border: 1px solid var(--line);
   border-radius: 1.3rem;
-  background: var(--panel);
+  background: rgb(10 14 28 / 0.74);
   backdrop-filter: blur(22px) saturate(1.3);
   -webkit-backdrop-filter: blur(22px) saturate(1.3);
-  box-shadow: 0 18px 50px -32px rgb(30 34 44 / 0.4);
+  box-shadow: 0 18px 50px -32px rgb(0 0 0 / 0.8);
   transition:
     opacity 0.8s var(--ease-out-quart),
     transform 1s var(--ease-out-expo);
@@ -304,16 +311,16 @@ html.js .card[data-reveal]:not(.is-revealed) {
 .card h3 {
   margin: 0;
   font-family: var(--font-aeris);
-  font-size: 1.15rem;
-  font-weight: 650;
-  letter-spacing: -0.035em;
+  font-size: 1.2rem;
+  font-weight: 500;
+  letter-spacing: -0.02em;
 }
 
 .card-year {
   margin: 0.2rem 0 0.5rem;
   color: var(--soft);
-  font-size: 0.82rem;
-  font-variant-numeric: tabular-nums;
+  font-family: var(--font-terminal);
+  font-size: 1rem;
 }
 
 details {
@@ -322,9 +329,9 @@ details {
 
 summary {
   width: fit-content;
-  color: var(--signal-ink);
+  color: var(--signal);
   font-size: 0.875rem;
-  font-weight: 650;
+  font-weight: 600;
   cursor: pointer;
 }
 
@@ -337,7 +344,7 @@ details[open] summary {
   gap: 1.1rem;
   margin: auto 0 0;
   font-size: 0.92rem;
-  font-weight: 650;
+  font-weight: 600;
 }
 
 .projects-end {
@@ -355,6 +362,7 @@ details[open] summary {
 
 .panel-contact h2 {
   font-size: clamp(2.6rem, 5vw, 4.2rem);
+  font-weight: 300;
 }
 
 .contact-links {
@@ -371,7 +379,7 @@ details[open] summary {
   padding: 0.75rem 1.25rem;
   border: 1px solid var(--line);
   border-radius: 999px;
-  background: #fff;
+  background: rgb(255 255 255 / 0.06);
   color: var(--ink);
   font-size: 0.95rem;
   font-weight: 600;
@@ -382,42 +390,19 @@ details[open] summary {
 }
 
 .pill:hover {
-  background: #f1f2f4;
+  background: rgb(255 255 255 / 0.12);
   color: var(--ink);
 }
 
 .pill-primary {
-  border-color: var(--ink);
-  background: var(--ink);
-  color: #fff;
+  border-color: var(--signal);
+  background: var(--signal);
+  color: #04121a;
 }
 
 .pill-primary:hover {
-  background: var(--signal-ink);
-  color: #fff;
-}
-
-/* callout line ----------------------------------------------------------------- */
-.callout {
-  position: fixed;
-  inset: 0;
-  z-index: 5;
-  width: 100%;
-  height: 100%;
-  opacity: 0;
-  pointer-events: none;
-}
-
-.callout polyline {
-  fill: none;
-  stroke: var(--signal);
-  stroke-width: 1.5;
-}
-
-.callout circle {
-  fill: #fff;
-  stroke: var(--signal);
-  stroke-width: 2;
+  background: #a4ecff;
+  color: #04121a;
 }
 
 @media (max-width: 48rem) {
@@ -430,7 +415,7 @@ details[open] summary {
   .panel {
     width: 100%;
     padding: 1.2rem 1.25rem;
-    background: rgb(255 255 255 / 0.84);
+    background: rgb(8 12 24 / 0.82);
   }
 
   .stage .prose {
@@ -439,5 +424,15 @@ details[open] summary {
 
   .hero {
     align-items: end;
+  }
+
+  /* the drone and its load hang in the top half; the hero keeps only what fits below them */
+  .spec-strip {
+    display: none;
+  }
+
+  .hero-intro {
+    margin-bottom: 1.4rem;
+    font-size: 0.95rem;
   }
 }
