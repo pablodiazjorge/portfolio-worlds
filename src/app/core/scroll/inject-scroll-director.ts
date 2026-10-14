@@ -9,14 +9,18 @@ export interface ScrollAware {
 /**
  * Builds a ScrollDirector from the page's `[data-anchor]` elements once it renders in the
  * browser, hands it to the scene when the scene is ready, and tears both down with the page.
+ * `stepped` makes every gesture travel to the next anchor (see ScrollDirectorOptions).
  */
-export function injectScrollDirector(scene: Signal<ScrollAware | null>, hold?: number): Signal<ScrollDirector | null> {
+export function injectScrollDirector(
+  scene: Signal<ScrollAware | null>,
+  options: { hold?: number; stepped?: boolean } = {},
+): Signal<ScrollDirector | null> {
   const host = inject(ElementRef<HTMLElement>).nativeElement as HTMLElement;
   const director = signal<ScrollDirector | null>(null);
 
   afterNextRender(() => {
     const anchors = Array.from(host.querySelectorAll<HTMLElement>('[data-anchor]'));
-    director.set(new ScrollDirector({ anchors, smooth: !prefersReducedMotion(), hold }));
+    director.set(new ScrollDirector({ anchors, smooth: !prefersReducedMotion(), ...options }));
   });
 
   effect(() => scene()?.attachScroll(director()));

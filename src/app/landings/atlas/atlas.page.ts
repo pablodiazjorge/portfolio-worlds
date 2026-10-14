@@ -37,7 +37,8 @@ export class AtlasPage {
     return new AtlasScene(ctx);
   });
 
-  private readonly director = injectScrollDirector(this.scene);
+  // every stop is one gesture away; only the project list scrolls freely
+  private readonly director = injectScrollDirector(this.scene, { stepped: true });
 
   constructor() {
     let last = -1;

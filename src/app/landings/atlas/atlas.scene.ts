@@ -7,7 +7,9 @@ import {
   max,
   mix,
   mx_noise_float,
+  normalFlat,
   normalize,
+  normalView,
   positionLocal,
   positionWorld,
   positionWorldDirection,
@@ -123,6 +125,8 @@ export class AtlasScene implements WorldScene {
   private readonly uSun = uniform(new THREE.Color());
   private readonly uSunDir = uniform(new THREE.Vector3(0, 1, 0));
   private readonly uMist = uniform(1);
+  /** How much of the hard facet survives on the terrain: 0 smooth, 1 fully faceted. */
+  private readonly uFacet = uniform(0.25);
 
   private readonly sunDir = new THREE.Vector3();
   private readonly lightDir = new THREE.Vector3();
@@ -188,10 +192,11 @@ export class AtlasScene implements WorldScene {
       mesh.castShadow = this.sun.castShadow && !ground;
       mesh.receiveShadow = this.sun.castShadow;
       if (name === 'terrain') {
+        mesh.geometry.computeVertexNormals();
         mesh.material = this.terrainMaterial();
         material.dispose();
         found.terrain = mesh;
-      } else if (name.startsWith('pine_foliage') || name.startsWith('grass_tuft')) {
+      } else if (name.startsWith('pine_foliage') || name.startsWith('leaf') || name.startsWith('grass_tuft')) {
         mesh.geometry.computeBoundingBox();
         const box = mesh.geometry.boundingBox ?? new THREE.Box3(new THREE.Vector3(), new THREE.Vector3(1, 1, 1));
         const grass = name.startsWith('grass');
@@ -258,7 +263,7 @@ export class AtlasScene implements WorldScene {
     const hidden = new THREE.Matrix4().makeScale(0, 0, 0);
     root.traverse((object) => {
       const mesh = object as THREE.InstancedMesh;
-      if (!mesh.isInstancedMesh || !mesh.name.startsWith('pine')) return;
+      if (!mesh.isInstancedMesh || !/^(pine|broadleaf)/.test(mesh.name)) return;
       let changed = false;
       for (let i = 0; i < mesh.count; i++) {
         mesh.getMatrixAt(i, instance);
@@ -390,9 +395,14 @@ export class AtlasScene implements WorldScene {
     return this.bag.add(material);
   }
 
-  /** Vertex colours from Blender with a fine grain that only shows when the camera is close. */
+  /**
+   * Vertex colours from Blender with a fine grain that only shows when the camera is close.
+   * The shading mostly follows smooth normals with a hint of the facets: fully faceted, the
+   * denser grid read as a mesh of hard triangles that fought the shadows on top of it.
+   */
   private terrainMaterial(): THREE.MeshStandardNodeMaterial {
-    const material = new THREE.MeshStandardNodeMaterial({ roughness: 0.95, flatShading: true });
+    const material = new THREE.MeshStandardNodeMaterial({ roughness: 0.95 });
+    material.normalNode = mix(normalView, normalFlat, this.uFacet).normalize();
     const p = positionWorld.xz;
     const grain = mx_noise_float(p.mul(1.3)).mul(0.5).add(0.5);
     const fine = mx_noise_float(p.mul(6.0)).mul(0.5).add(0.5);

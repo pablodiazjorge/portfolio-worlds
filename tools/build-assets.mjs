@@ -71,6 +71,9 @@ const ASSETS = [
 ];
 
 const args = process.argv.slice(2);
+// BLENDER_ARGS passes options to the model script (say a design variant) and ASSET_OUT writes
+// the result elsewhere, so variants can be compared without touching the published model.
+const blenderArgs = (process.env.BLENDER_ARGS ?? '').split(' ').filter(Boolean);
 const skipBlender = args.includes('--skip-blender');
 const filters = args.filter((a) => !a.startsWith('--'));
 const selected = ASSETS.filter((a) => filters.length === 0 || filters.some((f) => a.name.includes(f)));
@@ -98,7 +101,7 @@ let failed = false;
 
 for (const asset of selected) {
   const raw = join(ROOT, 'tools/out/raw', `${asset.name}.glb`);
-  const out = join(ROOT, asset.out);
+  const out = process.env.ASSET_OUT && selected.length === 1 ? resolve(ROOT, process.env.ASSET_OUT) : join(ROOT, asset.out);
   mkdirSync(dirname(raw), { recursive: true });
   mkdirSync(dirname(out), { recursive: true });
 
@@ -111,7 +114,7 @@ for (const asset of selected) {
     rmSync(raw, { force: true });
     const result = spawnSync(
       BLENDER,
-      ['--background', '--factory-startup', '--python-exit-code', '1', '--python', join(ROOT, 'tools/blender', asset.script), '--', '--out', raw],
+      ['--background', '--factory-startup', '--python-exit-code', '1', '--python', join(ROOT, 'tools/blender', asset.script), '--', '--out', raw, ...blenderArgs],
       { stdio: ['ignore', 'pipe', 'pipe'], encoding: 'utf8' },
     );
     const log = `${result.stdout ?? ''}${result.stderr ?? ''}`;

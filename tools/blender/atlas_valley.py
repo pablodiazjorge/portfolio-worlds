@@ -5,6 +5,7 @@ The camera rig in the app reads the `anchor_*` empties and the `water` empty; `s
 mark chimneys and campfires for the app's smoke.
 """
 
+import argparse
 import math
 import os
 import random
@@ -21,6 +22,11 @@ sys.path.append(os.path.join(os.path.dirname(os.path.abspath(__file__)), "_lib")
 import pw  # noqa: E402
 
 args = pw.parse_args()
+# Design variants, so they can be built side by side and compared before one becomes the default.
+_variants = argparse.ArgumentParser()
+_variants.add_argument("--trees", choices=("a", "b", "c"), default="a")
+_variants.add_argument("--grass", choices=("a", "b", "c"), default="a")
+VARIANT = _variants.parse_known_args(sys.argv[sys.argv.index("--") + 1:] if "--" in sys.argv else [])[0]
 pw.reset(args.seed)
 noise.seed_set(args.seed)
 rng = random.Random(args.seed)
@@ -319,7 +325,7 @@ M = {
     "root": pw.material("root", "#6e5038", 0.95),
     "bush": pw.material("bush", "#3f6a3c", 0.9),
     "bush_light": pw.material("bush_light", "#5f8248", 0.9),
-    "snow_print": pw.material("snow_print", "#a9b2c4", 0.9),
+    "snow_print": pw.material("snow_print", "#b9c1d0", 0.9),
     "dark": pw.material("observatory_slit", "#1d2030", 0.6),
     "observatory": pw.material("observatory_white", "#eeeef0", 0.45, 0.05),
     "glow_fire": pw.material("fire_glow", "#ffb24a", 1.0, emission="#ff9a3a", emission_strength=6.0),
@@ -811,16 +817,74 @@ def near_site(x, y, extra=0.0):
     return any(math.hypot(x - sx, y - sy) < PAD.get(n, 6.5) + extra for n, (sx, sy) in SITES.items())
 
 
-# steps on steep stretches, edging stones and way-marks
-rock_src = []
-for k_ in range(3):
+# --- stones ------------------------------------------------------------------------------------------
+STONE_TONES = [Vector(pw.hex_color(c)[:3]) for c in ("#8d8a96", "#9c9088", "#76717e", "#aaa4ae")]
+LICHEN = Vector(pw.hex_color("#8c9656")[:3])
+LICHEN_PALE = Vector(pw.hex_color("#b9b98f")[:3])
+rock_material = pw.vertex_color_material("rock_detail", roughness=0.95)
+
+
+def chiselled_stone(name, subdivisions=2, squash=(1.15, 0.92, 0.66), cuts=9, tone=0, lichen=0.35, radius=0.5):
+    """A stone with split faces: a dented sphere cut by several random planes, the way rock breaks,
+    with a bedded base. Colour goes per face: every plane gets its own shade from the way it
+    faces, hollows and the foot go darker, and faces that look up carry patches of lichen."""
+    r = random.Random(f"{args.seed}-{name}")
     bm = bmesh.new()
-    pw.add_ico(bm, (0, 0, 0), 0.5, 1, (1.2, 0.9, 0.6))
+    pw.add_ico(bm, (0, 0, 0), radius, subdivisions, squash)
+    offset = Vector((r.uniform(0, 40), r.uniform(0, 40), r.uniform(0, 40)))
     for v in bm.verts:
-        v.co += Vector((rng.uniform(-0.08, 0.08), rng.uniform(-0.08, 0.08), rng.uniform(-0.05, 0.05)))
-    o = pw.bm_object(f"pebble_src_{k_}", bm, M["stone_light" if k_ == 1 else "stone"])
-    rock_src.append(o.data)
-    bpy.data.objects.remove(o)
+        u = v.co / radius
+        v.co *= 1.0 + 0.12 * noise.noise(u * 1.2 + offset) + 0.04 * noise.noise(u * 3.2 + offset)
+    for _ in range(cuts):
+        normal = Vector((r.uniform(-1, 1), r.uniform(-1, 1), r.uniform(-0.25, 1.0))).normalized()
+        extent = max(abs(normal.x) * squash[0], abs(normal.y) * squash[1], abs(normal.z) * squash[2]) * radius
+        depth = extent * r.uniform(0.45, 0.78)
+        for v in bm.verts:
+            d = v.co.dot(normal)
+            if d > depth:
+                v.co -= normal * (d - depth)
+    floor_ = -squash[2] * radius * 0.6
+    for v in bm.verts:
+        v.co.z = max(v.co.z, floor_)
+    obj = pw.bm_object(name, bm, rock_material)
+    mesh = obj.data
+    base = STONE_TONES[tone % len(STONE_TONES)]
+    mean = sum(v.co.length for v in mesh.vertices) / len(mesh.vertices)
+    attr = mesh.color_attributes.new(name="Col", type="BYTE_COLOR", domain="CORNER")
+    colors = [0.0] * (len(mesh.loops) * 4)
+    for poly in mesh.polygons:
+        n = poly.normal
+        centre = poly.center
+        # faces on one plane share a normal, so they share this shade and read as one cut face
+        shade = 0.88 + 0.24 * (0.5 + 0.5 * noise.noise(n * 2.3 + offset))
+        hollow = pw.smoothstep(0.0, 0.2, (mean - centre.length) / max(mean, 1e-4))
+        face = base * (shade * (1.0 - 0.28 * hollow))
+        patch = noise.noise(centre / radius * 2.2 + offset * 1.7)
+        if lichen > 0 and n.z > 0.35 and patch > 0.5 - lichen:
+            face = face.lerp(LICHEN if patch > 0.72 - lichen else LICHEN_PALE, 0.5 * pw.smoothstep(0.5 - lichen, 0.85 - lichen, patch))
+        for li in poly.loop_indices:
+            z = mesh.vertices[mesh.loops[li].vertex_index].co.z
+            foot = 1.0 - pw.smoothstep(floor_, floor_ + squash[2] * radius * 0.6, z)
+            c = face * (1.0 - 0.25 * foot)
+            colors[li * 4:li * 4 + 4] = (c.x, c.y, c.z, 1.0)
+    attr.data.foreach_set("color", colors)
+    mesh.color_attributes.active_color = attr
+    mesh.color_attributes.render_color_index = 0
+    bpy.data.objects.remove(obj)
+    return mesh
+
+
+# Stones by the trail and on the scree in six shapes; the meadows get three lighter ones. The
+# shared generator skips the draws the old pebbles took, so everything placed later keeps its layout.
+for _ in range(3 * 42 * 3):
+    rng.random()
+# blocky, slab-like and upright shapes, so a handful of stones never repeats a silhouette
+STONE_SHAPES = ((1.25, 0.95, 0.72), (1.45, 1.0, 0.45), (0.95, 0.85, 1.0), (1.3, 0.8, 0.62), (1.1, 1.05, 0.8), (1.5, 0.9, 0.55))
+rock_src = [chiselled_stone(f"pebble_src_{k_}", 2, STONE_SHAPES[k_], 8 + k_ % 4, k_) for k_ in range(6)]
+meadow_src = [chiselled_stone(f"stone_src_{k_}", 1, STONE_SHAPES[k_ * 2], 7, k_ + 1, 0.3) for k_ in range(3)]
+slab_src = [chiselled_stone(f"slab_src_{k_}", 1, (2.2, 0.62, 0.22), 6, k_ + 1, 0.12) for k_ in range(3)]
+
+# steps on steep stretches, edging stones and way-marks
 
 edge_col = pw.collection("trail_edges")
 marker_bm = bmesh.new()
@@ -838,16 +902,12 @@ white_src = pw.bm_object("white_src", white_bm, M["white"]).data
 bpy.data.objects.remove(bpy.data.objects["white_src"])
 
 # flat stones set into the tread and footprints pressed into the snow
-flat_src = []
-for k_ in range(2):
-    bm = bmesh.new()
-    pw.add_ico(bm, (0, 0, 0), 1.0, 1, (1.0, 0.8, 0.22))
-    o = pw.bm_object(f"cobble_src_{k_}", bm, M["stone_light" if k_ else "stone"])
-    flat_src.append(o.data)
-    bpy.data.objects.remove(o)
+flat_src = [chiselled_stone(f"cobble_src_{k_}", 1, (1.0, 0.8, 0.24), 5, k_ + 1, 0.1, radius=1.0) for k_ in range(2)]
 print_bm = bmesh.new()
-pw.add_cone(print_bm, (0, 0, 0), 0.06, 0.06, 0.01, segments=7)
-bmesh.ops.scale(print_bm, vec=Vector((1.0, 1.8, 1.0)), verts=print_bm.verts[:])
+sole = pw.add_cone(print_bm, (0, 0.035, 0), 0.05, 0.05, 0.008, segments=10)
+bmesh.ops.scale(print_bm, vec=Vector((1.0, 1.55, 1.0)), verts=sole)
+heel = pw.add_cone(print_bm, (0, -0.075, 0), 0.04, 0.04, 0.008, segments=10)
+bmesh.ops.scale(print_bm, vec=Vector((1.0, 1.15, 1.0)), verts=heel)
 print_src = pw.bm_object("print_src", print_bm, M["snow_print"]).data
 bpy.data.objects.remove(bpy.data.objects["print_src"])
 
@@ -869,12 +929,14 @@ for k_, (p, side, z, tangent) in enumerate(rows):
         if z < 56:
             step_kit.cyl("wood", Vector((0, 0, 0)), 0.0, a + Vector((0, 0, 0.07)), b + Vector((0, 0, 0.07)), 0.06, seg=6)
         else:
-            centre = Vector((p.x, p.y, z + 0.06))
-            step_kit.box("stone_light", centre, math.atan2(side.y, side.x), (0, 0, 0), (TRAIL_HALF * 1.9, 0.26, 0.09))
+            obj = bpy.data.objects.new(f"slab_{k_}", slab_src[k_ % 3])
+            obj.rotation_euler = (0, 0, math.atan2(side.y, side.x) + trail_rng.uniform(-0.08, 0.08))
+            obj.location = (p.x, p.y, z + 0.04)
+            edge_col.objects.link(obj)
     if k_ % 4 == 0:
         s = 1 if (k_ // 4) % 2 else -1
         q = p + side * s * (TRAIL_HALF + 0.18 + rng.uniform(0, 0.12))
-        obj = bpy.data.objects.new(f"pebble_{k_}", rock_src[k_ % 3])
+        obj = bpy.data.objects.new(f"pebble_{k_}", rock_src[k_ % 6])
         size = rng.uniform(0.14, 0.32)
         obj.scale = (size, size * rng.uniform(0.7, 1.1), size * rng.uniform(0.5, 0.9))
         obj.rotation_euler = (0, 0, rng.uniform(0, math.tau))
@@ -959,30 +1021,109 @@ foliage_light = pw.material("pine_foliage_light", "#3d6a4a", roughness=0.9)
 trunk = pw.material("pine_trunk", "#5b4232", roughness=1.0)
 
 
-def pine_mesh(name, tiers, mat):
-    """More, slimmer tiers with nine sides each, and a slight irregularity so no two rims match."""
+leaf = pw.material("leaf", "#58793a", roughness=0.9)
+leaf_light = pw.material("leaf_light", "#7f9a47", roughness=0.9)
+leaf_autumn = pw.material("leaf_autumn", "#b9823a", roughness=0.9)
+leaf_autumn_light = pw.material("leaf_autumn_light", "#d8a84c", roughness=0.9)
+
+
+def pine_tiered(name, tiers, first, second):
+    """Variant a: twelve-sided tiers whose rims alternate out and down like the tips of branches,
+    banded in two greens, on a trunk that flares at the root."""
     bark = random.Random(f"{args.seed}-{name}")
     bm = bmesh.new()
-    trunk_verts = pw.add_cone(bm, (0, 0, 0), 0.09, 0.07, 0.5, segments=6)
-    pw.assign_material_index(bm, trunk_verts, 1)
-    z = 0.35
+    trunk_verts = pw.add_cone(bm, (0, 0, 0), 0.1, 0.06, 0.62, segments=7)
+    for v in trunk_verts:
+        if v.co.z < 0.01:
+            v.co.x *= 1.35
+            v.co.y *= 1.35
+    pw.assign_material_index(bm, trunk_verts, 2)
+    z = 0.38
     scale = 4.0 / (tiers - 1)
     for k in range(tiers):
-        radius = 0.64 - k * (0.46 / tiers)
-        height_ = (0.9 - k * 0.12 * scale) * scale * 0.8
-        vs = pw.add_cone(bm, (0, 0, z), radius, 0.02, height_, segments=9, rotation=k * 0.6)
-        for v in vs:
-            if v.co.z < z + height_ * 0.2:
-                v.co.x *= bark.uniform(0.9, 1.08)
-                v.co.y *= bark.uniform(0.9, 1.08)
-                v.co.z -= bark.uniform(0.0, 0.07)
-        z += height_ * 0.5
-    obj = pw.bm_object(name, bm, [mat, trunk])
+        radius = 0.68 - k * (0.5 / tiers)
+        height_ = (0.88 - k * 0.11 * scale) * scale * 0.72
+        vs = pw.add_cone(bm, (0, 0, z), radius, 0.02, height_, segments=12, rotation=k * 0.45 + bark.uniform(0, 0.3))
+        rim = sorted((v for v in vs if v.co.z < z + 1e-3 and v.co.xy.length > radius * 0.5), key=lambda v: math.atan2(v.co.y, v.co.x))
+        for i, v in enumerate(rim):
+            out = 1.13 if i % 2 == 0 else 0.9
+            v.co.x *= out * bark.uniform(0.96, 1.04)
+            v.co.y *= out * bark.uniform(0.96, 1.04)
+            v.co.z -= (0.09 * radius if i % 2 == 0 else 0.0) + bark.uniform(0.0, 0.03)
+        pw.assign_material_index(bm, vs, k % 2)
+        z += height_ * 0.46
+    obj = pw.bm_object(name, bm, [first, second, trunk])
     return obj.data
 
 
-pine_tall = pine_mesh("pine_tall", 5, foliage)
-pine_round = pine_mesh("pine_round", 4, foliage_light)
+def pine_branches(name, tiers, first, second):
+    """Variant b: a fir built from branches. Whorls of drooping blades round a tapering trunk,
+    dark near the trunk and lighter at the tips, with gaps the light and the trunk show through."""
+    bark = random.Random(f"{args.seed}-{name}")
+    bm = bmesh.new()
+    top = 0.4 + tiers * 0.36
+    trunk_verts = pw.add_cone(bm, (0, 0, 0), 0.09, 0.02, top, segments=7)
+    pw.assign_material_index(bm, trunk_verts, 2)
+    up = Vector((0.0, 0.0, 1.0))
+    for k in range(tiers):
+        f = k / max(1, tiers - 1)
+        z = 0.42 + k * (top - 0.75) / max(1, tiers - 1)
+        reach = 0.72 - 0.5 * f
+        blades = 8 - k // 2
+        for b in range(blades):
+            a = b / blades * math.tau + k * 0.55 + bark.uniform(-0.18, 0.18)
+            d = Vector((math.cos(a), math.sin(a), 0.0))
+            sd = Vector((-d.y, d.x, 0.0))
+            droop = reach * bark.uniform(0.32, 0.45)
+            width = reach * 0.34
+            points = (
+                up * (z + 0.12),
+                d * 0.06 + sd * width * 0.35 + up * z,
+                d * 0.06 - sd * width * 0.35 + up * z,
+                d * reach * 0.55 + up * (z + 0.04 - droop * 0.35),
+                d * reach * 0.55 + sd * width * 0.5 + up * (z - droop * 0.45),
+                d * reach * 0.55 - sd * width * 0.5 + up * (z - droop * 0.45),
+                d * reach + up * (z - droop),
+            )
+            v = [bm.verts.new(p) for p in points]
+            for face, index in (((v[0], v[3], v[4], v[1]), 0), ((v[0], v[2], v[5], v[3]), 0), ((v[3], v[6], v[4]), 1), ((v[3], v[5], v[6]), 1)):
+                bm.faces.new(face).material_index = index
+        # a small core, so a whorl reads as full from below
+        core = pw.add_cone(bm, (0, 0, z - 0.05), reach * 0.32, 0.03, 0.42, segments=7, rotation=k)
+        pw.assign_material_index(bm, core, 0)
+    spire = pw.add_cone(bm, (0, 0, top - 0.32), 0.16, 0.0, 0.5, segments=7)
+    pw.assign_material_index(bm, spire, 1)
+    obj = pw.bm_object(name, bm, [first, second, trunk])
+    return obj.data
+
+
+def broadleaf(name, first, second):
+    """Variant c adds these: a round crown of dented blobs in two tones over a straight trunk."""
+    bark = random.Random(f"{args.seed}-{name}")
+    bm = bmesh.new()
+    trunk_verts = pw.add_cone(bm, (0, 0, 0), 0.11, 0.07, 1.2, segments=7)
+    pw.assign_material_index(bm, trunk_verts, 2)
+    blobs = ((0.0, 0.0, 1.75, 0.62), (0.38, 0.1, 1.5, 0.48), (-0.34, -0.12, 1.55, 0.5), (0.05, -0.36, 1.45, 0.44), (-0.1, 0.34, 2.05, 0.4))
+    offset = Vector((bark.uniform(0, 30), bark.uniform(0, 30), bark.uniform(0, 30)))
+    for i, (x, y, z, r) in enumerate(blobs):
+        vs = pw.add_ico(bm, (x, y, z), r, 1, (1.0, 1.0, 0.85))
+        centre = Vector((x, y, z))
+        for v in vs:
+            v.co = centre + (v.co - centre) * (1.0 + 0.12 * noise.noise((v.co - centre) * 3.0 + offset))
+        pw.assign_material_index(bm, vs, i % 2)
+    obj = pw.bm_object(name, bm, [first, second, trunk])
+    return obj.data
+
+
+if VARIANT.trees == "b":
+    pine_tall = pine_branches("pine_tall", 7, foliage, foliage_light)
+    pine_round = pine_branches("pine_round", 5, foliage_light, foliage)
+else:
+    pine_tall = pine_tiered("pine_tall", 7, foliage, foliage_light)
+    pine_round = pine_tiered("pine_round", 5, foliage_light, foliage)
+broadleaf_green = broadleaf("broadleaf_green", leaf, leaf_light) if VARIANT.trees == "c" else None
+broadleaf_autumn = broadleaf("broadleaf_autumn", leaf_autumn, leaf_autumn_light) if VARIANT.trees == "c" else None
+tree_rng = random.Random(f"{args.seed}-tree-kinds")
 
 trees_col = pw.collection("trees")
 placed = 0
@@ -1004,6 +1145,9 @@ while placed < 1800 and attempts < 70000:
     if d_route < 3.4 or near_site(x, y, 2.5):
         continue
     mesh = pine_tall if rng.random() < 0.65 else pine_round
+    # variant c: broadleaves take over much of the low ground, a few already turning
+    if broadleaf_green and h < 30.0 and tree_rng.random() < 0.45:
+        mesh = broadleaf_autumn if tree_rng.random() < 0.18 else broadleaf_green
     obj = bpy.data.objects.new(f"tree_{placed}", mesh)
     s = rng.uniform(1.4, 2.6) * (1.0 - 0.3 * pw.smoothstep(30.0, 50.0, h))
     obj.scale = (s, s, s * rng.uniform(0.9, 1.25))
@@ -1015,18 +1159,8 @@ print(f"[pw] trees placed: {placed}")
 
 # --- boulders ----------------------------------------------------------------------------------------
 rocks_col = pw.collection("rocks")
-# Boulders get their own, finer meshes: twice subdivided and dented, so they hold up close.
-boulder_rng = random.Random(f"{args.seed}-boulders")
-boulder_src = []
-for k_ in range(3):
-    bm = bmesh.new()
-    pw.add_ico(bm, (0, 0, 0), 0.5, 2, (1.2, 0.95, 0.68))
-    for v in bm.verts:
-        dent = noise.noise(v.co * 3.1 + Vector((k_ * 7.3, 1.7, 4.2)))
-        v.co *= 1.0 + 0.16 * dent + boulder_rng.uniform(-0.03, 0.03)
-    o = pw.bm_object(f"boulder_src_{k_}", bm, M["stone_light" if k_ == 1 else "stone"])
-    boulder_src.append(o.data)
-    bpy.data.objects.remove(o)
+# Boulders: the same chiselled stones, cut more often and carrying more lichen.
+boulder_src = [chiselled_stone(f"boulder_src_{k_}", 2, STONE_SHAPES[k_ * 2 + 1], 9, k_, 0.45) for k_ in range(3)]
 for k in range(220):
     x = rng.uniform(-170.0, 170.0)
     y = rng.uniform(-170.0, 170.0)
@@ -1051,8 +1185,15 @@ for k in range(220):
     rocks_col.objects.link(obj)
 
 # --- grass tufts and flowers along the trail and around the camps ---------------------------------------------
-grass_mat = pw.material("grass_tuft", "#7d9a52", 0.9)
-grass_dry = pw.material("grass_tuft_dry", "#a7a35f", 0.9)
+# Grass variants: a smaller; b smaller, sparser and muted; c a fine low lawn close to the ground's colour.
+GRASS = {
+    "a": {"scale": 0.55, "keep": 1.0, "green": "#7d9a52", "dry": "#a7a35f", "fine": False},
+    "b": {"scale": 0.45, "keep": 0.55, "green": "#728c4e", "dry": "#9a9760", "fine": False},
+    "c": {"scale": 1.0, "keep": 1.0, "green": "#78934f", "dry": "#a29c5c", "fine": True},
+}[VARIANT.grass]
+grass_keep = random.Random(f"{args.seed}-grass-keep")
+grass_mat = pw.material("grass_tuft", GRASS["green"], 0.9)
+grass_dry = pw.material("grass_tuft_dry", GRASS["dry"], 0.9)
 
 
 def tuft_mesh(name, mat):
@@ -1062,17 +1203,20 @@ def tuft_mesh(name, mat):
         rng.random()
     blade = random.Random(f"{args.seed}-{name}")
     bm = bmesh.new()
-    for k in range(7):
-        a = k / 7 * math.tau + blade.uniform(-0.35, 0.35)
+    fine = GRASS["fine"]
+    count = 11 if fine else 7
+    for k in range(count):
+        a = k / count * math.tau + blade.uniform(-0.35, 0.35)
         out = Vector((math.cos(a), math.sin(a), 0))
         side = Vector((-math.sin(a), math.cos(a), 0))
-        tall = blade.uniform(0.3, 0.46)
-        root = out * blade.uniform(0.0, 0.05)
-        v1 = bm.verts.new(root - side * 0.032)
-        v2 = bm.verts.new(root + side * 0.032)
+        tall = blade.uniform(0.13, 0.24) if fine else blade.uniform(0.3, 0.46)
+        width = 0.018 if fine else 0.032
+        root = out * blade.uniform(0.0, 0.07 if fine else 0.05)
+        v1 = bm.verts.new(root - side * width)
+        v2 = bm.verts.new(root + side * width)
         knee = root + out * tall * 0.16 + Vector((0, 0, tall * 0.55))
-        v3 = bm.verts.new(knee + side * 0.02)
-        v4 = bm.verts.new(knee - side * 0.02)
+        v3 = bm.verts.new(knee + side * width * 0.6)
+        v4 = bm.verts.new(knee - side * width * 0.6)
         v5 = bm.verts.new(root + out * tall * 0.45 + Vector((0, 0, tall)))
         bm.faces.new((v1, v2, v3, v4))
         bm.faces.new((v4, v3, v5))
@@ -1122,9 +1266,15 @@ while (count_tufts < 2600 or count_flowers < 700) and attempts < 60000:
         count_tufts += 1
     else:
         continue
+    is_tuft = obj.name.startswith("tuft")
+    if is_tuft:
+        s *= GRASS["scale"]
     obj.scale = (s, s, s)
     obj.rotation_euler = (0, 0, rng.uniform(0, math.tau))
     obj.location = (q.x, q.y, h - 0.02)
+    if is_tuft and grass_keep.random() > GRASS["keep"]:
+        bpy.data.objects.remove(obj)
+        continue
     detail_col.objects.link(obj)
 print(f"[pw] tufts {count_tufts}, flowers {count_flowers}")
 
@@ -1137,7 +1287,7 @@ for name in ("camp_3", "camp_4", "camp_5", "ridge"):
         x, y = sx + math.cos(a) * r, sy + math.sin(a) * r
         if route_distance(x, y)[0] < TRAIL_HALF + 0.3:
             continue
-        obj = bpy.data.objects.new(f"scree_{name}_{k}", rock_src[k % 3])
+        obj = bpy.data.objects.new(f"scree_{name}_{k}", rock_src[k % 6])
         s = rng.uniform(0.12, 0.45) * (1.6 if rng.random() < 0.12 else 1.0)
         obj.scale = (s, s * rng.uniform(0.7, 1.2), s * rng.uniform(0.5, 0.8))
         obj.rotation_euler = (0, 0, rng.uniform(0, math.tau))
@@ -1175,7 +1325,7 @@ while (placed_tufts < 5200 or placed_bushes < 380 or placed_stones < 1400) and a
         continue
     patch = noise.noise(Vector((x * 0.06, y * 0.06, 12.3)))
     if placed_stones < 1400 and h > 24.0 and up > 0.62 and scatter.random() < 0.3:
-        obj = bpy.data.objects.new(f"stone_{placed_stones}", rock_src[placed_stones % 3])
+        obj = bpy.data.objects.new(f"stone_{placed_stones}", meadow_src[placed_stones % 3])
         size = scatter.uniform(0.12, 0.42) * (1.8 if scatter.random() < 0.1 else 1.0)
         obj.scale = (size, size * scatter.uniform(0.7, 1.2), size * scatter.uniform(0.5, 0.85))
         obj.rotation_euler = (0, 0, scatter.uniform(0, math.tau))
@@ -1191,11 +1341,14 @@ while (placed_tufts < 5200 or placed_bushes < 380 or placed_stones < 1400) and a
     elif placed_tufts < 5200 and h < 60.0 and up > 0.8 and patch > -0.15:
         dry = h > 32.0 or scatter.random() < 0.25
         obj = bpy.data.objects.new(f"meadow_tuft_{placed_tufts}", tufts[1 if dry else 0])
-        size = scatter.uniform(0.8, 1.6)
+        size = scatter.uniform(0.8, 1.6) * GRASS["scale"]
         obj.scale = (size, size, size * scatter.uniform(0.85, 1.2))
         obj.rotation_euler = (0, 0, scatter.uniform(0, math.tau))
         obj.location = (x, y, h - 0.02)
         placed_tufts += 1
+        if grass_keep.random() > GRASS["keep"]:
+            bpy.data.objects.remove(obj)
+            continue
     else:
         continue
     detail_col.objects.link(obj)

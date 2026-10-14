@@ -19,7 +19,8 @@ def parse_args():
     parser = argparse.ArgumentParser()
     parser.add_argument("--out", required=True)
     parser.add_argument("--seed", type=int, default=7)
-    return parser.parse_args(argv)
+    # scripts may read options of their own from the same argument list
+    return parser.parse_known_args(argv)[0]
 
 
 def reset(seed):
