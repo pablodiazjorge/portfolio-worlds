@@ -66,11 +66,12 @@ const ASSETS = [
     script: 'atrium_museum.py',
     out: 'public/models/atrium/museum.glb',
     budgetKB: 4000,
+    textureSize: 2048,
     keepNodes: true,
   },
   {
     name: 'atrium-robot',
-    source: 'tools/vendor/RobotExpressive.glb',
+    script: 'atrium_visitor.py',
     out: 'public/models/atrium/robot.glb',
     budgetKB: 500,
     keepNodes: true,

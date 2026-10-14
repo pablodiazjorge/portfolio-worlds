@@ -1,13 +1,13 @@
 import * as THREE from 'three/webgpu';
-import { abs, color, float, fract, max, min, mix, mx_noise_float, positionLocal, positionWorld, reflector, smoothstep, texture, time, uv, vec2 } from 'three/tsl';
-import { drawLandscape, drawStainedGlass } from './stained-glass';
+import { abs, color, float, fract, max, min, mix, mx_noise_float, normalWorld, positionLocal, positionWorld, reflector, smoothstep, texture, time, uv, vec2 } from 'three/tsl';
+import { drawLandscape, drawPainting, drawStainedGlass } from './stained-glass';
 import { RoomEnvironment } from 'three/addons/environments/RoomEnvironment.js';
 import { dequantizeMeshes } from '../../core/assets/dequantize';
 import { loadGltf } from '../../core/assets/gltf';
 import { DisposeBag, disposeObject } from '../../core/engine/dispose';
 import { EngineContext, WorldScene } from '../../core/engine/world-scene';
 import { Character, FloorBox, MoveInput } from './character';
-import { drawAbout, drawContact, drawLabel, drawLightbox, drawSign, loadMuseumFonts, MuseumCopy, PanelTexture } from './museum-textures';
+import { drawAbout, drawContact, drawFace, drawLabel, drawLightbox, drawSign, loadMuseumFonts, MuseumCopy, PanelTexture, drawPlaque } from './museum-textures';
 
 export type ExhibitKind = 'about' | 'experience' | 'project' | 'contact';
 
@@ -33,24 +33,30 @@ const NODES: Record<string, { x: number; z: number; rooms: Room[] }> = {
   W2: { x: -4.1, z: -12.5, rooms: ['hall'] },
   E2: { x: 4.1, z: -12.5, rooms: ['hall'] },
   A: { x: 0, z: -16, rooms: ['hall', 'second'] },
-  N: { x: 0, z: -30, rooms: ['second'] },
+  W3: { x: -2.4, z: -33.75, rooms: ['second'] },
+  E3: { x: 2.4, z: -33.75, rooms: ['second'] },
 };
 const EDGES: [string, string][] = [
-  ['S', 'W1'], ['S', 'E1'], ['W1', 'W2'], ['E1', 'E2'], ['W2', 'A'], ['E2', 'A'], ['A', 'N'],
+  ['S', 'W1'], ['S', 'E1'], ['W1', 'W2'], ['E1', 'E2'], ['W2', 'A'], ['E2', 'A'], ['A', 'W3'], ['A', 'E3'],
 ];
 
 const roomAt = (_x: number, z: number): Room => (z > -18.5 ? 'hall' : 'second');
 
-/** The roped pedestal in the middle of the nave, which a straight walk must go round. */
-const PEDESTAL = { minX: -3.8, maxX: 3.8, minZ: -10.8, maxZ: -3.2 };
+/** The roped pedestal in the nave and the table case in the far room, which a straight walk must go round. */
+const BLOCKS: FloorBox[] = [
+  { minX: -2.9, maxX: 2.9, minZ: -9.55, maxZ: -4.45 },
+  { minX: -1.4, maxX: 1.4, minZ: -34.8, maxZ: -32.7 },
+];
 
-function crossesPedestal(from: THREE.Vector3, to: THREE.Vector3): boolean {
+const crossesBlocks = (from: THREE.Vector3, to: THREE.Vector3): boolean => BLOCKS.some((box) => crossesBox(from, to, box));
+
+function crossesBox(from: THREE.Vector3, to: THREE.Vector3, box: FloorBox): boolean {
   // a 2D segment against the box, by clipping the parameter range on each axis
   let t0 = 0;
   let t1 = 1;
   for (const [a, b, lo, hi] of [
-    [from.x, to.x, PEDESTAL.minX, PEDESTAL.maxX],
-    [from.z, to.z, PEDESTAL.minZ, PEDESTAL.maxZ],
+    [from.x, to.x, box.minX, box.maxX],
+    [from.z, to.z, box.minZ, box.maxZ],
   ]) {
     const d = b - a;
     if (Math.abs(d) < 1e-6) {
@@ -77,6 +83,9 @@ export class AtriumScene implements WorldScene {
   readonly exhibits: Exhibit[] = [];
   private readonly clickables: THREE.Mesh[] = [];
   private readonly panels = new Map<string, PanelTexture>();
+  private face: PanelTexture | null = null;
+  private blinkAt = 3;
+  private eyesOpen = true;
   private copy: MuseumCopy;
 
   private readonly keys = { forward: 0, right: 0, run: false };
@@ -89,9 +98,12 @@ export class AtriumScene implements WorldScene {
   private elapsed = 0;
   private active: Exhibit | null = null;
   private lastWave = -10;
-  private readonly sun = new THREE.DirectionalLight('#ffc27a', 7.5);
+  private readonly sun = new THREE.DirectionalLight('#ffb868', 10);
   private readonly sunOffset = new THREE.Vector3(-12, 7.5, 3);
   private readonly glassCache = new Map<string, THREE.Material>();
+  private readonly paintings = new Map<number, HTMLCanvasElement>();
+  private readonly paintingMaps = new Map<number, THREE.CanvasTexture>();
+  private readonly covers = new Map<string, HTMLImageElement>();
   private readonly raycaster = new THREE.Raycaster();
   private readonly floor = new THREE.Plane(new THREE.Vector3(0, 1, 0), 0);
   private readonly pivot = new THREE.Vector3();
@@ -111,7 +123,7 @@ export class AtriumScene implements WorldScene {
     this.copy = copy;
     this.scene.background = new THREE.Color('#1a1712');
     // a bright hall: warm bounce from the marble, cooler light from high up, sun from the west
-    this.scene.add(new THREE.HemisphereLight('#ffdcb0', '#5a4636', 0.22));
+    this.scene.add(new THREE.HemisphereLight('#a9b4cc', '#3a2a1e', 0.12));
     this.sun.position.set(-9, 14, 4);
     this.sun.castShadow = ctx.quality !== 'low';
     this.sun.shadow.mapSize.set(2048, 2048);
@@ -122,7 +134,8 @@ export class AtriumScene implements WorldScene {
     cam.bottom = -16;
     cam.near = 1;
     cam.far = 50;
-    this.sun.shadow.bias = -0.0006;
+    this.sun.shadow.bias = -0.0004;
+    this.sun.shadow.normalBias = 0.02;
     this.sun.shadow.radius = 4;
     this.scene.add(this.sun, this.sun.target);
   }
@@ -163,6 +176,7 @@ export class AtriumScene implements WorldScene {
     this.scene.add(root);
     this.redraw();
 
+    this.dressVisitor(robot.scene);
     this.character = new Character(robot, this.obstacles);
     const spawn = root.getObjectByName('spawn')?.position ?? new THREE.Vector3(0, 0, 31);
     this.character.place(spawn.x, spawn.z, Math.PI);
@@ -197,14 +211,38 @@ export class AtriumScene implements WorldScene {
     const p = positionWorld.xz;
     const grain = mx_noise_float(positionWorld.mul(1.3)).mul(0.5).add(0.5);
 
+    // a cream marble (Poly Haven, CC0) projected from the three axes, so nothing needs UVs
+    const texLoader = new THREE.TextureLoader();
+    const marbleMap = this.bag.add(texLoader.load('textures/atrium/marble-diffuse.webp'));
+    const marbleRough = this.bag.add(texLoader.load('textures/atrium/marble-rough.webp'));
+    for (const t of [marbleMap, marbleRough]) {
+      t.wrapS = t.wrapT = THREE.RepeatWrapping;
+      t.anisotropy = 8;
+    }
+    marbleMap.colorSpace = THREE.SRGBColorSpace;
+    const triplanar = (map: THREE.Texture, scale: number) => {
+      const q = positionWorld.mul(scale);
+      const n = normalWorld.abs();
+      const w = n.div(n.x.add(n.y).add(n.z).add(0.0001));
+      return texture(map, q.zy).rgb.mul(w.x).add(texture(map, q.xz).rgb.mul(w.y)).add(texture(map, q.xy).rgb.mul(w.z));
+    };
+    // ashlar joints: courses of 0.9 m and blocks of 1.4 m along whichever way the wall runs
+    const alongWall = mix(positionWorld.x, positionWorld.z, normalWorld.abs().x);
+    const course = abs(fract(positionWorld.y.div(0.9)).sub(0.5)).negate().add(0.5).mul(0.9);
+    const block = abs(fract(alongWall.div(1.4).add(positionWorld.y.div(0.9).floor().mul(0.5))).sub(0.5)).negate().add(0.5).mul(1.4);
+    const ashlar = float(1).sub(smoothstep(0.006, 0.02, min(course, block)));
+    const stoneTex = triplanar(marbleMap, 1 / 1.5);
+
     // cream stone with a little dirt in the grain; the mouldings a shade darker
-    const stone = std('stone', { roughness: 0.85 });
-    stone.colorNode = mix(color('#e3d5be'), color('#cdbb9e'), grain.mul(0.6));
-    const stoneDark = std('stone_dark', { roughness: 0.85 });
-    stoneDark.colorNode = mix(color('#cbbb9f'), color('#b5a387'), grain.mul(0.6));
+    const stone = std('stone', { roughness: 0.7 });
+    stone.colorNode = mix(stoneTex.mul(color('#f3e9d6')), color('#b8a98f'), ashlar.mul(0.55)).mul(mix(0.94, 1.04, grain));
+    stone.roughnessNode = mix(float(0.5), float(0.85), triplanar(marbleRough, 1 / 1.5).r);
+    const stoneDark = std('stone_dark', { roughness: 0.75 });
+    stoneDark.colorNode = stoneTex.mul(color('#d7c8ae')).mul(mix(0.92, 1.04, grain));
     const vault = std('vault', { roughness: 0.9 });
+    const vaultTex = triplanar(marbleMap, 1 / 2.6);
     // the webs darken towards the crown, where the candlelight does not reach
-    vault.colorNode = mix(color('#efe4d2'), color('#cdbfa8'), smoothstep(14, 22.5, positionWorld.y));
+    vault.colorNode = vaultTex.mul(mix(color('#f6ede0'), color('#d2c4ad'), smoothstep(14, 22.5, positionWorld.y)));
     std('rib', { color: '#9c8a6a', roughness: 0.85 });
     std('panel_blue', { color: '#233459', roughness: 0.8 });
     std('gold', { color: '#d8b05a', roughness: 0.28, metalness: 1 });
@@ -213,7 +251,7 @@ export class AtriumScene implements WorldScene {
     std('wood', { color: '#3b2719', roughness: 0.55 });
     std('velvet', { color: '#a1202f', roughness: 0.95 });
     const marble = std('marble', { roughness: 0.28 });
-    marble.colorNode = mix(color('#f3efe8'), color('#d9d2c6'), smoothstep(0.55, 0.9, mx_noise_float(positionWorld.mul(2.2))).mul(0.5));
+    marble.colorNode = triplanar(marbleMap, 1 / 1.2).mul(color('#fbf7f0'));
     std('statue', { color: '#a6a39d', roughness: 0.72 });
     std('plinth', { color: '#2b211c', roughness: 0.75 });
     std('lead', { color: '#141418', roughness: 0.9 });
@@ -234,20 +272,21 @@ export class AtriumScene implements WorldScene {
     // polished marble with the inlay: red bands on a diamond grid and a border along the walls
     const floor = std('floor', { roughness: 0.14 });
     const veins = smoothstep(0.48, 0.92, mx_noise_float(positionWorld.mul(vec2(0.9, 0.35).xyx)).mul(0.5).add(0.5));
-    const base = mix(color('#e2d9c8'), color('#c9bda9'), veins.mul(0.55));
+    const floorTex = texture(marbleMap, p.div(2.4).add(vec2(0.13, 0.41))).rgb;
+    const base = floorTex.mul(mix(color('#e9dfcb'), color('#cbbda5'), veins.mul(0.6)));
     const turned = vec2(p.x.add(p.y), p.x.sub(p.y)).div(8.0);
     const cell = turned.floor();
     const toLine = abs(fract(turned).sub(0.5));
     const nearest = min(toLine.x, toLine.y);
-    const band = float(1).sub(smoothstep(0.024, 0.034, nearest));
-    const inner = smoothstep(0.3, 0.32, nearest).mul(float(1).sub(smoothstep(0.34, 0.36, nearest)));
+    const band = float(1).sub(smoothstep(0.038, 0.05, nearest));
+    const inner = smoothstep(0.27, 0.29, nearest).mul(float(1).sub(smoothstep(0.33, 0.35, nearest)));
+    const core = smoothstep(0.42, 0.45, nearest);
     const checker = fract(cell.x.add(cell.y).mul(0.5)).mul(2);
-    const field = mix(base, mix(color('#bdb19d'), color('#a89d8b'), veins.mul(0.5)), checker);
+    const field = mix(base, floorTex.mul(mix(color('#c9bca6'), color('#b2a692'), veins.mul(0.5))), checker);
     const border = float(1).sub(smoothstep(0.1, 0.2, abs(abs(p.x).sub(5.55))));
-    const joints = max(float(1).sub(smoothstep(0.004, 0.012, abs(fract(p.x.div(1.1)).sub(0.5)).negate().add(0.5))), float(1).sub(smoothstep(0.004, 0.012, abs(fract(p.y.div(1.1)).sub(0.5)).negate().add(0.5))));
     const inlay = max(band, border);
-    const stoneFloor = mix(mix(mix(field, color('#b9b2a4'), joints.mul(0.45)), color('#9a9388'), inner.mul(0.6)), color('#4f1016'), inlay.mul(0.96));
-    floor.roughnessNode = mix(float(0.12), float(0.3), inlay);
+    const stoneFloor = mix(mix(mix(field, color('#7a2f33'), inner.mul(0.85)), color('#9a9388'), core.mul(checker).mul(0.6)), color('#4f1016'), inlay.mul(0.96));
+    floor.roughnessNode = mix(texture(marbleRough, p.div(2.4)).r.mul(0.35).add(0.06), float(0.3), inlay);
     if (this.ctx.quality === 'low') {
       floor.colorNode = stoneFloor;
     } else {
@@ -269,19 +308,21 @@ export class AtriumScene implements WorldScene {
       let material: THREE.Material | undefined;
       if (name.startsWith('canvas_')) {
         const index = Number(name.split('_')[1]);
-        const project = this.copy.portfolio.projects[index];
         const art = new THREE.MeshBasicNodeMaterial();
-        const map = loader.load(project?.cover ?? '');
+        const canvas = document.createElement('canvas');
+        this.paintings.set(index, canvas);
+        const map = new THREE.CanvasTexture(canvas);
         map.colorSpace = THREE.SRGBColorSpace;
         map.flipY = false;
         map.anisotropy = 8;
         this.bag.add(map);
+        this.paintingMaps.set(index, map);
         art.colorNode = texture(map).rgb.mul(0.95);
         material = this.bag.add(art);
         mesh.userData['exhibit'] = `project-${index}`;
         this.clickables.push(mesh);
-      } else if (name.startsWith('label_') || name.startsWith('exp_') || name.startsWith('sign_') || name === 'about_panel' || name === 'contact_panel') {
-        const size: Record<string, [number, number]> = { label: [512, 334], exp: [1024, 648], sign: [1024, 256], about: [1400, 720], contact: [1024, 568] };
+      } else if (name.startsWith('label_') || name.startsWith('exp_') || name.startsWith('sign_') || name.startsWith('plaque_') || name === 'about_panel' || name === 'contact_panel') {
+        const size: Record<string, [number, number]> = { label: [512, 334], exp: [1024, 648], sign: [1024, 256], plaque: [640, 256], about: [1400, 720], contact: [1024, 568] };
         const key = name.split('_')[0];
         const [w, h] = size[key] ?? [512, 512];
         const panel = new PanelTexture(w, h);
@@ -309,6 +350,18 @@ export class AtriumScene implements WorldScene {
         material = this.glassFor(mesh);
       } else if (mesh.name.startsWith('deco_canvas')) {
         material = this.landscapeFor(mesh);
+      } else if (source.name === 'shadow_patch') {
+        // the contact shadow under the statue: a soft dark disc that fades out at its edge
+        const patch = new THREE.MeshBasicNodeMaterial({ transparent: true, depthWrite: false });
+        patch.colorNode = color('#1a110a');
+        patch.opacityNode = smoothstep(0.3, 1.0, uv().sub(0.5).mul(2).length()).oneMinus().mul(0.6);
+        material = this.bag.add(patch);
+      } else if (source.name === 'statue_tex') {
+        // the generated statue keeps its baked texture, lifted towards pale stone and matte
+        const baked = (source as THREE.MeshStandardMaterial).map;
+        const stone = new THREE.MeshStandardNodeMaterial({ roughness: 0.8, metalness: 0 });
+        if (baked) stone.colorNode = texture(baked).rgb.mul(1.3);
+        material = this.bag.add(stone);
       } else {
         material = lib.get(source.name);
       }
@@ -317,7 +370,7 @@ export class AtriumScene implements WorldScene {
         mesh.material = material;
       }
       mesh.receiveShadow = source.name !== 'glass' && source.name !== 'flame';
-      mesh.castShadow = /^(marble|statue|plinth|wood|stone|stone_dark)$/.test(source.name);
+      mesh.castShadow = /^(marble|statue|statue_tex|plinth|wood|stone|stone_dark)$/.test(source.name);
     });
     lib.forEach((m) => this.bag.add(m));
   }
@@ -367,7 +420,7 @@ export class AtriumScene implements WorldScene {
       map.anisotropy = 8;
       this.bag.add(map);
       const basic = new THREE.MeshBasicNodeMaterial({ side: THREE.DoubleSide });
-      basic.colorNode = texture(map, uv()).rgb.pow(1.1).mul(2.4);
+      basic.colorNode = texture(map, uv()).rgb.pow(1.1).mul(2.9);
       material = basic;
       this.glassCache.set(key, material);
     }
@@ -390,7 +443,7 @@ export class AtriumScene implements WorldScene {
 
   /** A warm halo on the wall behind each sconce, where its candles would light the stone. */
   private addSconceHalos(root: THREE.Object3D): void {
-    const geometry = this.bag.add(new THREE.PlaneGeometry(1.8, 2.4));
+    const geometry = this.bag.add(new THREE.PlaneGeometry(0.9, 2.0));
     const material = new THREE.MeshBasicNodeMaterial({ transparent: true, depthWrite: false, blending: THREE.AdditiveBlending, side: THREE.DoubleSide });
     const d = uv().sub(vec2(0.5, 0.42)).mul(vec2(1, 0.8)).length();
     material.colorNode = color('#ffb761').mul(float(1).sub(smoothstep(0.08, 0.5, d)).pow(1.6).mul(0.55));
@@ -399,7 +452,7 @@ export class AtriumScene implements WorldScene {
       if (!/^candle_sconce/.test(o.name)) return;
       const halo = new THREE.Mesh(geometry, material);
       const side = Math.sign(o.position.x);
-      halo.position.set(o.position.x + side * 0.72, o.position.y + 0.3, o.position.z);
+      halo.position.set(o.position.x + side * 0.11, o.position.y + 0.3, o.position.z);
       halo.rotation.y = -side * Math.PI / 2;
       halo.renderOrder = 2;
       this.scene.add(halo);
@@ -440,7 +493,7 @@ export class AtriumScene implements WorldScene {
     const along = positionLocal.y.negate().div(15);
     const dust = smoothstep(0.62, 0.9, mx_noise_float(positionWorld.mul(1.4).add(time.mul(0.06))));
     const across = float(1).sub(smoothstep(0.45, 1.0, abs(positionLocal.x).div(1.6))).mul(float(1).sub(smoothstep(0.4, 1.0, abs(positionLocal.z).div(0.8))));
-    material.colorNode = color('#ffe2b4').mul(float(1).sub(along).pow(1.6).mul(0.075).add(dust.mul(0.02))).mul(across);
+    material.colorNode = color('#ffcf8a').mul(float(1).sub(along).pow(1.6).mul(0.045).add(dust.mul(0.014))).mul(across);
     this.bag.add(material);
     const down = new THREE.Vector3(0, -1, 0);
     root.traverse((o) => {
@@ -462,7 +515,7 @@ export class AtriumScene implements WorldScene {
     const pick = fract(mx_noise_float(cell.mul(0.37).xyx).mul(4.7).add(0.5));
     const tint = mix(mix(color('#2f5fb8'), color('#b8262d'), smoothstep(0.2, 0.3, pick)), mix(color('#e0a62a'), color('#2f7c45'), smoothstep(0.7, 0.8, pick)), smoothstep(0.45, 0.55, pick));
     const edge = smoothstep(0, 0.18, uv().x).mul(smoothstep(1, 0.82, uv().x)).mul(smoothstep(0, 0.12, uv().y)).mul(smoothstep(1, 0.88, uv().y));
-    material.colorNode = mix(tint, color('#fff1d8'), 0.45).mul(edge.mul(0.26));
+    material.colorNode = mix(tint, color('#fff1d8'), 0.45).mul(edge.mul(0.2));
     this.bag.add(material);
     root.traverse((o) => {
       if (!/^window_-1_\d+_at$/.test(o.name)) return;
@@ -497,19 +550,44 @@ export class AtriumScene implements WorldScene {
     portfolio.projects.forEach((project, i) => {
       const panel = this.panels.get(`label_${i}`);
       if (panel) drawLabel(panel, project, this.copy.medium);
+      this.paint(i, project);
     });
     experience.forEach((job, i) => {
       const panel = this.panels.get(`exp_${i}`);
       if (panel) drawLightbox(panel, job);
+      const plaque = this.panels.get(`plaque_exp_${i}`);
+      if (plaque) drawPlaque(plaque, job);
     });
     const about = this.panels.get('about_panel');
     if (about) drawAbout(about, portfolio);
     const contact = this.panels.get('contact_panel');
     if (contact) drawContact(contact, this.copy.contactTitle, portfolio);
+    // the sign over the arch names the room beyond it, where the experience is; the lectern says what it is for
     const hall = this.panels.get('sign_hall');
-    if (hall) drawSign(hall, this.copy.projectsSign);
-    const wing = this.panels.get('sign_wing');
-    if (wing) drawSign(wing, this.copy.experienceSign);
+    if (hall) drawSign(hall, this.copy.experienceSign);
+    const lectern = this.panels.get('sign_contact');
+    if (lectern) drawSign(lectern, this.copy.contactTitle);
+  }
+
+  /** Paints one project's picture: a landscape in oils with its mark in a roundel and a cartouche. */
+  private paint(index: number, project: { title: string; tagline: string; cover: string }): void {
+    const canvas = this.paintings.get(index);
+    const map = this.paintingMaps.get(index);
+    if (!canvas || !map) return;
+    const seed = 41 + index * 131;
+    let cover = this.covers.get(project.cover) ?? null;
+    if (!cover) {
+      const image = new Image();
+      image.onload = () => {
+        this.covers.set(project.cover, image);
+        drawPainting(canvas, 1024, 670, project.title, project.tagline, seed, image);
+        map.needsUpdate = true;
+      };
+      image.src = project.cover;
+      cover = null;
+    }
+    drawPainting(canvas, 1024, 670, project.title, project.tagline, seed, cover);
+    map.needsUpdate = true;
   }
 
   // --- input -----------------------------------------------------------------------------------
@@ -581,9 +659,11 @@ export class AtriumScene implements WorldScene {
     const start = roomAt(from.x, from.z);
     const end = roomAt(to.x, to.z);
     if (start === end) {
-      if (!crossesPedestal(from, to)) return [];
-      // round the ropes along the aisle on the target's side, in the direction of travel
-      const side = Math.sign(to.x || from.x || 1) < 0 ? ['W1', 'W2'] : ['E1', 'E2'];
+      if (!crossesBlocks(from, to)) return [];
+      // in the far room, round the table case by its side; in the nave, round the ropes along the
+      // aisle on the target's side, in the direction of travel
+      const west = Math.sign(to.x || from.x || 1) < 0;
+      const side = start === 'second' ? [west ? 'W3' : 'E3'] : west ? ['W1', 'W2'] : ['E1', 'E2'];
       const ordered = from.z > to.z ? side : [...side].reverse();
       return ordered.map((id) => new THREE.Vector3(NODES[id].x, 0, NODES[id].z));
     }
@@ -600,10 +680,9 @@ export class AtriumScene implements WorldScene {
       }
       return best;
     };
-    const source = nearest(from, start);
     const goal = nearest(to, end);
-    const distance = new Map<string, number>([[source, 0]]);
-    const previous = new Map<string, string>();
+    const distance = new Map<string, number>([[goal, 0]]);
+    const towardsGoal = new Map<string, string>();
     const open = new Set(Object.keys(NODES));
     while (open.size) {
       let current = '';
@@ -615,7 +694,7 @@ export class AtriumScene implements WorldScene {
           current = id;
         }
       }
-      if (!current || current === goal) break;
+      if (!current) break;
       open.delete(current);
       for (const [a, b] of EDGES) {
         const next = a === current ? b : b === current ? a : null;
@@ -623,14 +702,25 @@ export class AtriumScene implements WorldScene {
         const step = Math.hypot(NODES[a].x - NODES[b].x, NODES[a].z - NODES[b].z);
         if (best + step < (distance.get(next) ?? Infinity)) {
           distance.set(next, best + step);
-          previous.set(next, current);
+          towardsGoal.set(next, current);
         }
       }
     }
+    let source = '';
+    let bestTotal = Infinity;
+    for (const [id, node] of Object.entries(NODES)) {
+      if (!node.rooms.includes(start) || !distance.has(id)) continue;
+      const point = new THREE.Vector3(node.x, 0, node.z);
+      const total = from.distanceTo(point) + distance.get(id)! + (crossesBlocks(from, point) ? 100 : 0);
+      if (total < bestTotal) {
+        bestTotal = total;
+        source = id;
+      }
+    }
     const path: THREE.Vector3[] = [];
-    for (let id: string | undefined = goal; id; id = previous.get(id)) {
-      path.unshift(new THREE.Vector3(NODES[id].x, 0, NODES[id].z));
-      if (id === source) break;
+    for (let id: string | undefined = source; id; id = towardsGoal.get(id)) {
+      path.push(new THREE.Vector3(NODES[id].x, 0, NODES[id].z));
+      if (id === goal) break;
     }
     return path;
   }
@@ -678,6 +768,31 @@ export class AtriumScene implements WorldScene {
     this.sun.target.updateMatrixWorld();
 
     this.detectExhibit(elapsed);
+    this.blink(elapsed);
+  }
+
+  /** The visitor's face: a canvas on its monitor, redrawn to blink now and then. */
+  private dressVisitor(model: THREE.Object3D): void {
+    const panel = new PanelTexture(256, 176);
+    this.face = this.bag.add(panel);
+    drawFace(panel, true);
+    const screen = new THREE.MeshBasicNodeMaterial();
+    screen.colorNode = texture(panel.texture).rgb;
+    this.bag.add(screen);
+    model.traverse((o) => {
+      const mesh = o as THREE.Mesh;
+      if (!mesh.isMesh) return;
+      const materials = Array.isArray(mesh.material) ? mesh.material : [mesh.material];
+      const replaced = materials.map((m) => (m.name === 'visitor_screen' ? screen : m));
+      mesh.material = Array.isArray(mesh.material) ? replaced : replaced[0];
+    });
+  }
+
+  private blink(elapsed: number): void {
+    if (!this.face || elapsed < this.blinkAt) return;
+    this.eyesOpen = !this.eyesOpen;
+    drawFace(this.face, this.eyesOpen);
+    this.blinkAt = elapsed + (this.eyesOpen ? 2.5 + Math.random() * 3 : 0.14);
   }
 
   private updateCamera(dt: number, snap: boolean): void {

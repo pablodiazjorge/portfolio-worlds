@@ -3,8 +3,8 @@ every bay carries a painting on a navy panel below and a two-light stained-glass
 clustered piers with gilt capitals, crimson banners hung beside the windows, candle sconces and
 chandeliers under a pointed ribbed vault, a balcony with a great window over the pointed arch to
 a narrower second room with arcades and side aisles, a stone pedestal with a statue in the middle
-of the hall ringed by velvet ropes, glass cases with open books along the walls, marble busts, a
-bench and a lectern by the entrance.
+of the hall ringed by velvet ropes, ebonised cabinets with the experience in the far room, a bench
+and a lectern by the entrance.
 
 Proportions measured against the reference from its own camera (see the reference camera in the
 live session: from the east side at 1.6 m, looking north-west): paintings 1.3-5.5 m, window sills
@@ -43,7 +43,7 @@ SILL, SPRING, WAPEX, WHW = 6.0, 11.0, 13.6, 1.5  # the two-light windows
 WALL = 14.5  # where the vault springs
 APEX = 22.5  # the vault's point
 PANEL_Z0, PANEL_Z1, PANEL_W = 1.3, 5.5, 3.1  # the navy panels behind the paintings
-PIER_D, PIER_W = 0.45, 0.9  # the piers stand proud of the wall, with three shafts in front
+PIER_D, PIER_W = 0.3, 0.9  # the piers stand proud of the wall, with three shafts in front
 HW2, WALL2, APEX2 = 4.0, 14.5, 20.5  # the second room: narrower, with arcades to side aisles
 AISLE, AISLE_Z = 3.0, 8.6  # the aisles behind the arcades and their flat ceiling
 Y1 = Y_ARCH + 6 * BAY  # the far wall: six bays
@@ -59,6 +59,7 @@ M = {
     "crimson": pw.material("crimson", "#8c1f2f", 0.85),
     "wood": pw.material("wood", "#3a2619", 0.6),
     "velvet": pw.material("velvet", "#9d1f2e", 0.9),
+    "shadow_patch": pw.material("shadow_patch", "#000000", 0.9, alpha=0.5),
     "marble": pw.material("marble", "#f1ede6", 0.3),
     "statue": pw.material("statue", "#a9a7a3", 0.7),
     "plinth": pw.material("plinth", "#2b211c", 0.75),
@@ -79,7 +80,7 @@ M = {
 
 groups = {name: pw.empty(name, (0, 0, 0)) for name in ("solid", "decor", "exhibits")}
 n = {"i": 0}
-ASSETS = os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "assets", "polyhaven")
+ASSETS = os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "assets")
 _asset_cache = {}
 _asset_templates = []
 
@@ -108,7 +109,7 @@ def place_asset(asset, location, scale=1.0, yaw=0.0, name=None):
         o = template.copy()
         o.hide_render = False
         o.hide_viewport = False
-        o.name = f"{name or asset}_{k}" if len(_asset_cache[asset]) > 1 else (name or asset)
+        o.name = f"{name or os.path.basename(asset)}_{k}" if len(_asset_cache[asset]) > 1 else (name or os.path.basename(asset))
         o.location = location
         o.scale = (scale, scale, scale)
         o.rotation_euler = (0, 0, yaw)
@@ -394,19 +395,25 @@ pierced_wall("wall_entrance_low", "stone", "decor", "y", Y0 - T / 2, -HW - T, HW
 pierced_wall("wall_entrance_high", "stone", "decor", "y", Y0 - T / 2, -HW - T, HW + T, EW_SILL - 0.3, APEX + 0.5, opening(EW_HW, EW_SILL, EW_SPRING, EW_APEX, 12))
 stained_window("window_entrance", "y", Y0 - T / 2, 0.0, EW_HW, EW_SILL, EW_SPRING, EW_APEX, "n", depth=-0.12)
 pw.empty("window_entrance_at", (0, Y0, (EW_SILL + EW_APEX) / 2))
-box("solid", "collider", -HW - T, -DOOR_HW, Y0 - T, Y0, 0, 0.1, "entrance_l")
-box("solid", "collider", DOOR_HW, HW + T, Y0 - T, Y0, 0, 0.1, "entrance_r")
+box("solid", "collider", -HW - T, -DOOR_HW, Y0 - T, Y0, 0, WALL, "entrance_l")
+box("solid", "collider", DOOR_HW, HW + T, Y0 - T, Y0, 0, WALL, "entrance_r")
 box("solid", "wood", -DOOR_HW, DOOR_HW, Y0 - T / 2 - 0.1, Y0 - T / 2 + 0.1, 0, DOOR_Z + 2.0, "door")
 for k in range(5):
     box("decor", "iron", -DOOR_HW + 0.1, DOOR_HW - 0.1, Y0 - T / 2 + 0.1, Y0 - T / 2 + 0.14, 0.8 + k * 1.0, 0.86 + k * 1.0, f"door_band_{k}")
 for sx in (-1, 1):
     box("decor", "stone_dark", sx * (DOOR_HW + 0.05), sx * (DOOR_HW + 0.45), Y0 - T / 2 - 0.2, Y0, 0, DOOR_Z + 0.3, f"door_jamb_{sx}")
+for step, (dr, depth) in enumerate(((0.0, 0.0), (0.26, 0.16))):
+    bm = bmesh.new()
+    pts = [Vector((u, Y0 + depth, z)) for u, z in arch(DOOR_HW + dr + 0.12, DOOR_Z, DOOR_Z + 2.0 + dr * 1.1, 12)]
+    tube(bm, [Vector((-DOOR_HW - dr - 0.12, Y0 + depth, 0.0))] + pts + [Vector((DOOR_HW + dr + 0.12, Y0 + depth, 0.0))], 0.1, sides=6)
+    obj(f"door_archivolt_{step}", bm, "stone_dark", "decor")
 
 # the arch between the two rooms, pointed, with the balcony above it
 ARCH_HW, ARCH_SPRING, ARCH_APEX = 2.9, 6.0, 10.0
-pierced_wall("wall_arch", "stone", "decor", "y", Y_ARCH, -HW - T, HW + T, -0.2, WALL, opening(ARCH_HW, 0.0, ARCH_SPRING, ARCH_APEX, 14), thickness=0.9)
-box("solid", "collider", -HW - T, -ARCH_HW, Y_ARCH - 0.45, Y_ARCH + 0.45, 0, 0.1, "arch_l")
-box("solid", "collider", ARCH_HW, HW + T, Y_ARCH - 0.45, Y_ARCH + 0.45, 0, 0.1, "arch_r")
+BALC_Z = 10.6  # the balcony floor over the arch
+pierced_wall("wall_arch", "stone", "decor", "y", Y_ARCH, -HW - T, HW + T, -0.2, BALC_Z, opening(ARCH_HW, 0.0, ARCH_SPRING, ARCH_APEX, 14), thickness=0.9)
+box("solid", "collider", -HW - T, -ARCH_HW, Y_ARCH - 0.45, Y_ARCH + 0.45, 0, WALL, "arch_l")
+box("solid", "collider", ARCH_HW, HW + T, Y_ARCH - 0.45, Y_ARCH + 0.45, 0, WALL, "arch_r")
 # archivolts: two stepped mouldings following the arch on the hall side
 for step, (dr, depth) in enumerate(((0.0, 0.0), (0.32, 0.18))):
     bm = bmesh.new()
@@ -414,7 +421,6 @@ for step, (dr, depth) in enumerate(((0.0, 0.0), (0.32, 0.18))):
     tube(bm, [Vector((-ARCH_HW - dr - 0.12, Y_ARCH - 0.45 - depth, 0.0))] + pts + [Vector((ARCH_HW + dr + 0.12, Y_ARCH - 0.45 - depth, 0.0))], 0.12, sides=6)
     obj(f"archivolt_{step}", bm, "stone_dark", "decor")
 # the balcony: a slab over the arch and a stout stone balustrade, a sign on its face
-BALC_Z = 10.6
 box("decor", "stone", -HW, HW, Y_ARCH - 1.6, Y_ARCH + 0.45, BALC_Z - 0.4, BALC_Z, "balcony_slab")
 box("decor", "stone_dark", -HW, HW, Y_ARCH - 1.78, Y_ARCH - 1.6, BALC_Z - 0.55, BALC_Z, "balcony_edge")
 for i in range(22):
@@ -423,7 +429,7 @@ for i in range(22):
     cyl("decor", "marble", (xb, Y_ARCH - 1.45, BALC_Z + 0.35), (xb, Y_ARCH - 1.45, BALC_Z + 0.65), 0.15, seg=8, name=f"baluster_belly_{i}")
 box("decor", "marble", -HW, HW, Y_ARCH - 1.62, Y_ARCH - 1.28, BALC_Z + 0.95, BALC_Z + 1.15, "balcony_rail")
 box("decor", "marble", -HW, HW, Y_ARCH - 1.62, Y_ARCH - 1.28, BALC_Z, BALC_Z + 0.1, "balcony_rail_low")
-quad("sign_hall", "label", (0, Y_ARCH - 1.79, BALC_Z - 0.28), 2.4, 0.4, "s")
+quad("sign_hall", "label", (0, Y_ARCH - 1.79, BALC_Z - 0.3), 3.4, 0.5, "s")
 # the gallery wall above the balcony, pierced by a great window glazed on both faces
 GW_HW, GW_SILL, GW_SPRING, GW_APEX = 2.6, BALC_Z + 1.0, BALC_Z + 4.6, BALC_Z + 8.0
 pierced_wall("wall_gallery", "stone", "decor", "y", Y_ARCH, -HW - T, HW + T, BALC_Z, APEX + 0.5, opening(GW_HW, GW_SILL, GW_SPRING, GW_APEX, 14), thickness=0.6)
@@ -432,7 +438,7 @@ stained_window("window_gallery_back", "y", Y_ARCH, 0.0, GW_HW, GW_SILL, GW_SPRIN
 pw.empty("window_gallery_at", (0, Y_ARCH, (GW_SILL + GW_APEX) / 2))
 # on the hall face of the arch wall: a small painting to the left, a banner to the right
 box("decor", "stone_dark", -4.9, -2.9, Y_ARCH - 0.45 - 0.14, Y_ARCH - 0.45, 6.6, 9.4, "arch_moulding")
-box("decor", "panel_blue", -4.7, -3.1, Y_ARCH - 0.45 - 0.17, Y_ARCH - 0.45 - 0.14, 6.8, 9.2, "arch_panel")
+box("decor", "stone_dark", -4.7, -3.1, Y_ARCH - 0.45 - 0.17, Y_ARCH - 0.45 - 0.14, 6.8, 9.2, "arch_panel")
 for (xx0, xx1, zz0, zz1) in ((-4.5, -3.3, 7.05, 7.2), (-4.5, -3.3, 8.8, 8.95), (-4.5, -4.35, 7.2, 8.8), (-3.45, -3.3, 7.2, 8.8)):
     box("decor", "gold", xx0, xx1, Y_ARCH - 0.45 - 0.25, Y_ARCH - 0.45 - 0.17, zz0, zz1)
 quad("deco_canvas", "canvas", (-3.9, Y_ARCH - 0.45 - 0.19, 8.0), 1.05, 1.6, "s", group="decor")
@@ -454,9 +460,9 @@ for side in (-1, 1):
         stained_window(f"window2_{side}_{k}", "x", x_arc, yc, CL_HW, CL_SILL, CL_SPRING, CL_APEX, "e" if side < 0 else "w", depth=side * 0.14)
         pw.empty(f"window2_{side}_{k}_at", (x_arc, yc, (CL_SILL + CL_APEX) / 2))
         # sconces on the arcade piers at the painting height of the main hall
-    for k in range(len(bays2) + 1):
+    for k in range(1, len(bays2)):
         yb = Y_ARCH + k * BAY
-        box("solid", "collider", x_arc - 0.35, x_arc + 0.35, yb - 0.42, yb + 0.42, 0, 0.1, f"arcade_pier_{side}_{k}")
+        box("solid", "collider", x_arc - 0.35, x_arc + 0.35, yb - 0.42, yb + 0.42, 0, AISLE_Z, f"arcade_pier_{side}_{k}")
         # a clustered pier: a square core with four shafts, a base and a stone capital with a gilt fillet
         box("decor", "stone", x_arc - 0.3, x_arc + 0.3, yb - 0.3, yb + 0.3, 0.5, AR_SPRING - 0.4, f"column_{side}_{k}")
         for sx, sy in ((-0.3, 0), (0.3, 0), (0, -0.3), (0, 0.3)):
@@ -466,7 +472,6 @@ for side in (-1, 1):
         box("decor", "gold", x_arc - 0.47, x_arc + 0.47, yb - 0.47, yb + 0.47, AR_SPRING - 0.42, AR_SPRING - 0.37, f"column_fillet_{side}_{k}")
         box("decor", "stone_dark", x_arc - 0.52, x_arc + 0.52, yb - 0.52, yb + 0.52, AR_SPRING - 0.2, AR_SPRING + 0.05, f"column_abacus_{side}_{k}")
         # a transverse arch across the aisle at every bay line, under the aisle ceiling
-        box("decor", "stone_dark", min(x_arc, x_outer), max(x_arc, x_outer), yb - 0.22, yb + 0.22, AISLE_Z - 0.5, AISLE_Z, f"aisle_arch_{side}_{k}")
         # the vault's responds above the arcade
         box("decor", "stone", min(x_arc, x_arc - side * 0.3), max(x_arc, x_arc - side * 0.3), yb - 0.4, yb + 0.4, AR_APEX + 0.6, WALL2 - 0.5, f"respond_{side}_{k}")
         box("decor", "gold", min(x_arc, x_arc - side * 0.34), max(x_arc, x_arc - side * 0.34), yb - 0.46, yb + 0.46, WALL2 - 0.5, WALL2 - 0.3, f"respond_capital_{side}_{k}")
@@ -482,24 +487,23 @@ for side in (-1, 1):
         pierced_wall(f"aisle_wall_{side}_{k}", "stone", "decor", "x", x_outer + side * T / 2, b0, b1, AW_SILL - 0.3, AISLE_Z, hole)
         stained_window(f"window3_{side}_{k}", "x", x_outer + side * T / 2, yc, AW_HW, AW_SILL, AW_SPRING, AW_APEX, "e" if side < 0 else "w", depth=side * 0.14)
         pw.empty(f"window3_{side}_{k}_at", (x_outer, yc, (AW_SILL + AW_APEX) / 2))
-    box("decor", "vault", min(x_arc, x_outer + side * T), max(x_arc, x_outer + side * T), Y_ARCH, Y1, AISLE_Z, AISLE_Z + 0.4, f"aisle_ceiling_{side}")
     box("solid", "stone", min(x_arc, x_outer + side * T), max(x_arc, x_outer + side * T), Y1 - T / 2, Y1 + T / 2, 0, AISLE_Z + 0.4, f"aisle_end_{side}")
     box("solid", "stone", min(side * (HW + T), x_outer + side * T), max(side * (HW + T), x_outer + side * T), Y_ARCH - 0.45, Y_ARCH + 0.45, 0, AISLE_Z + 0.4, f"aisle_start_{side}")
-    box("decor", "stone", min(x_arc, side * (HW + T)), max(x_arc, side * (HW + T)), Y_ARCH - 0.45, Y_ARCH + 0.45, AISLE_Z + 0.4, WALL, f"aisle_start_high_{side}")
+    box("decor", "stone", min(x_arc, side * (HW + T)), max(x_arc, side * (HW + T)), Y_ARCH + 0.05, Y_ARCH + 0.45, AISLE_Z + 0.4, WALL2, f"aisle_start_high_{side}")
 
 # the far wall of the second room: the featured painting under a tall bright window
 FW_HW, FW_SILL, FW_SPRING, FW_APEX = 2.2, 6.4, 11.8, 14.8
 pierced_wall("wall_far", "stone", "decor", "y", Y1, -HW2 - T, HW2 + T, -0.2, APEX2 + 0.5, opening(FW_HW, FW_SILL, FW_SPRING, FW_APEX, 12))
-box("solid", "collider", -HW2 - T, HW2 + T, Y1 - T / 2, Y1 + T / 2, 0, 0.1, "far_low")
+box("solid", "collider", -HW2 - T, HW2 + T, Y1 - T / 2, Y1 + T / 2, 0, WALL2, "far_low")
 stained_window("window_far", "y", Y1, 0.0, FW_HW, FW_SILL, FW_SPRING, FW_APEX, "s", depth=0.14)
 pw.empty("window_far_at", (0, Y1, (FW_SILL + FW_APEX) / 2))
-box("decor", "stone_dark", -2.2, 2.2, Y1 - T / 2 - 0.14, Y1 - T / 2, PANEL_Z0 - 0.22, PANEL_Z1 + 0.22, "far_moulding")
-box("decor", "panel_blue", -1.98, 1.98, Y1 - T / 2 - 0.17, Y1 - T / 2 - 0.14, PANEL_Z0, PANEL_Z1, "far_panel")
-paintings.append(("s", 0.0, Y1 - T / 2 - 0.17, 1.0))
+box("decor", "stone_dark", -2.7, 2.7, Y1 - T / 2 - 0.14, Y1 - T / 2, PANEL_Z0 - 0.22, PANEL_Z1 + 0.6, "far_moulding")
+box("decor", "panel_blue", -2.48, 2.48, Y1 - T / 2 - 0.17, Y1 - T / 2 - 0.14, PANEL_Z0, PANEL_Z1 + 0.38, "far_panel")
+paintings.append(("s", 0.0, Y1 - T / 2 - 0.17, 1.4))
 
 # --- the vaults ------------------------------------------------------------------------------------
-def vault(name, hw, z_spring, z_apex, ya, yb, bays_, ridge_r):
-    section = arch(hw + T, z_spring, z_apex, 16)
+def vault(name, hw, z_spring, z_apex, ya, yb, bays_, ridge_r, x0=0.0, steps=16, inset_wall=T):
+    section = [(u + x0, z) for u, z in arch(hw + inset_wall, z_spring, z_apex, steps)]
     bm = bmesh.new()
     rings = [[bm.verts.new(Vector((u, yy, z))) for u, z in section] for yy in (ya, yb)]
     loft(bm, rings, closed=False)
@@ -508,8 +512,8 @@ def vault(name, hw, z_spring, z_apex, ya, yb, bays_, ridge_r):
         if f.normal.z > 0:
             f.normal_flip()
     obj(name, bm, "vault", "decor", smooth=True)
-    rib_section = inset(section, 0.1, z_spring)
-    diag_section = inset(section, 0.04, z_spring)
+    rib_section = [Vector((p.x + x0, 0, p.z)) for p in inset([(u - x0, z) for u, z in section], 0.1, z_spring)]
+    diag_section = [Vector((p.x + x0, 0, p.z)) for p in inset([(u - x0, z) for u, z in section], 0.04, z_spring)]
     for (b0, b1) in bays_:
         bm = bmesh.new()
         tube(bm, [Vector((p.x, b0, p.z)) for p in rib_section], 0.2, sides=6)
@@ -520,18 +524,21 @@ def vault(name, hw, z_spring, z_apex, ya, yb, bays_, ridge_r):
             tube(bm, pts, 0.14, sides=5)
             obj(f"{name}_diag_{b0}_{y_from}", bm, "rib", "decor")
         bm = bmesh.new()
-        pw.add_ico(bm, (0, (b0 + b1) / 2, z_apex - 0.2), 0.3, 1)
+        pw.add_ico(bm, (x0, (b0 + b1) / 2, z_apex - 0.2), 0.3 if hw > 3 else 0.16, 1)
         obj(f"{name}_boss_{b0}", bm, "gold", "decor", smooth=True)
     bm = bmesh.new()
     tube(bm, [Vector((p.x, bays_[-1][1], p.z)) for p in rib_section], 0.2, sides=6)
     obj(f"{name}_rib_end", bm, "rib", "decor")
     bm = bmesh.new()
-    tube(bm, [Vector((0, yy, z_apex - 0.08)) for yy in (ya, yb)], ridge_r, sides=6)
+    tube(bm, [Vector((x0, yy, z_apex - 0.08)) for yy in (ya, yb)], ridge_r, sides=6)
     obj(f"{name}_ridge", bm, "rib", "decor")
 
 
 vault("vault_main", HW, WALL, APEX, Y0 - T, Y_ARCH - 0.45, bays, 0.18)
 vault("vault_second", HW2, WALL2, APEX2, Y_ARCH, Y1 + T, bays2, 0.15)
+# the aisles get a pointed barrel vault each, narrow and low, with the transverse ribs at the bay lines
+for side in (-1, 1):
+    vault(f"vault_aisle_{side}", AISLE / 2, AISLE_Z - 1.6, AISLE_Z + 0.9, Y_ARCH, Y1 + T, bays2, 0.1, x0=side * (HW2 + T / 2 + AISLE / 2), steps=10, inset_wall=T / 2)
 
 # --- the floor: cream marble with the inlay drawn at runtime ------------------------------------
 box("decor", "floor", -HW - T, HW + T, Y0 - T, Y_ARCH, -0.1, 0, "floor")
@@ -551,7 +558,7 @@ for i, (facing, px, py, scale) in enumerate(paintings):
             box("decor", "brass", min(px + 0.1 * d, px + 0.14 * d), max(px + 0.1 * d, px + 0.14 * d), yy0, yy1, zz0, zz1)
         quad(f"canvas_{i}", "canvas", (px + 0.02 * d, py, z), w, h, facing)
         quad(f"label_{i}", "label", (px + 0.01 * d, py, z - h / 2 - 0.5), 0.6, 0.26, facing)
-        pw.empty(f"spot_canvas_{i}", (px + 2.3 * d, py, 0))
+        pw.empty(f"spot_canvas_{i}", (px + 1.9 * d, py, 0))
         pw.empty(f"light_{i}", (px + 0.3 * d, py, z + h / 2 + 0.6))
         cyl("decor", "brass", (px, py, z + h / 2 + 0.62), (px + 0.36 * d, py, z + h / 2 + 0.5), 0.02, seg=6, name=f"picture_light_arm_{i}")
         box("decor", "brass", min(px + 0.3 * d, px + 0.42 * d), max(px + 0.3 * d, px + 0.42 * d), py - 0.5, py + 0.5, z + h / 2 + 0.42, z + h / 2 + 0.52, f"picture_light_{i}")
@@ -591,13 +598,13 @@ def banner(side, yc, name, top=WAPEX - 0.6, bottom=SILL + 0.4, w=1.1, x=None):
         box("decor", "gold", min(xe, xe - side * 0.01), max(xe, xe - side * 0.01), yc - w / 2 + 0.05 + k * (w - 0.1) / 5, yc - w / 2 + 0.15 + k * (w - 0.1) / 5, bottom + 0.62 - k * 0.14, bottom + 0.8 - k * 0.14)
 
 
-def sconce(side, yc, name, x=None, z=3.9):
+def sconce(side, yc, name, x=None, z=3.3):
     x = side * (HW - PIER_D - 0.26 - 0.08) if x is None else x
     cyl("decor", "gold", (x + side * 0.25, yc, z - 0.6), (x, yc, z), 0.03, seg=6, name=name + "_arm")
     for k, dy in enumerate((-0.22, 0.0, 0.22)):
         cyl("decor", "gold", (x, yc + dy, z - 0.1), (x, yc + dy, z + 0.05), 0.06, seg=8, name=f"{name}_cup_{k}")
-        cyl("decor", "candle", (x, yc + dy, z + 0.05), (x, yc + dy, z + 0.4), 0.03, seg=6, name=f"{name}_candle_{k}")
-        cyl("decor", "flame", (x, yc + dy, z + 0.4), (x, yc + dy, z + 0.56), 0.03, seg=6, name=f"{name}_flame_{k}", r2=0.0)
+        cyl("decor", "candle", (x, yc + dy, z + 0.05), (x, yc + dy, z + 0.3), 0.022, seg=6, name=f"{name}_candle_{k}")
+        cyl("decor", "flame", (x, yc + dy, z + 0.3), (x, yc + dy, z + 0.42), 0.028, seg=6, name=f"{name}_flame_{k}", r2=0.0)
     cyl("decor", "gold", (x, yc - 0.3, z - 0.1), (x, yc + 0.3, z - 0.1), 0.025, seg=6, name=name + "_bar")
     pw.empty(f"candle_{name}", (x, yc, z + 0.45))
 
@@ -609,7 +616,9 @@ for side in (-1, 1):
     for k in range(1, 8):
         sconce(side, Y0 + k * BAY, f"sconce_{side}_{k}")
     for k in range(1, 6):
-        sconce(side, Y_ARCH + k * BAY, f"sconce2_{side}_{k}", x=side * (HW2 - 0.42), z=3.6)
+        sconce(side, Y_ARCH + k * BAY, f"sconce2_{side}_{k}", x=side * (HW2 - 0.56), z=3.3)
+    for k in (1, 3, 5):
+        banner(side, Y_ARCH + k * BAY, f"banner2_{side}_{k}", top=CL_APEX - 0.6, bottom=AR_APEX + 0.9, w=0.8, x=side * (HW2 - 0.5))
 # a narrow banner hanging from the balcony rail, to the right of the arch, facing the hall
 def banner_south(xc, y, top, bottom, w, name):
     bm = bmesh.new()
@@ -629,12 +638,12 @@ def banner_south(xc, y, top, bottom, w, name):
         box("decor", "gold", x0, x1, y - 0.04, y - 0.02, z0, z1)
 
 
-banner_south(4.4, Y_ARCH - 1.8, BALC_Z + 1.15, BALC_Z - 3.4, 0.9, "banner_balcony")
-banner_south(-4.4, Y_ARCH - 1.8, BALC_Z + 1.15, BALC_Z - 3.4, 0.9, "banner_balcony_l")
+banner_south(5.45, Y_ARCH - 1.8, BALC_Z + 1.15, BALC_Z - 3.4, 0.9, "banner_balcony")
+banner_south(-5.45, Y_ARCH - 1.8, BALC_Z + 1.15, BALC_Z - 3.4, 0.9, "banner_balcony_l")
 
 
-def chandelier(x, yv, z, name, radius=1.3, tiers=2, ring_mat="gold"):
-    cyl("decor", "iron", (x, yv, APEX - 0.3), (x, yv, z + 0.9 * (tiers - 1) + 0.6), 0.025, seg=6, name=name + "_chain")
+def chandelier(x, yv, z, name, radius=1.3, tiers=2, ring_mat="gold", top=None):
+    cyl("decor", "iron", (x, yv, (APEX if top is None else top) - 0.3), (x, yv, z + 0.9 * (tiers - 1) + 0.6), 0.025, seg=6, name=name + "_chain")
     for tier, (r, dz, count) in enumerate(((radius, 0.0, 12), (radius * 0.55, 0.9, 6))[:tiers]):
         bm = bmesh.new()
         ring_pts = [Vector((x + math.cos(a) * r, yv + math.sin(a) * r, z + dz)) for a in (k / 24 * math.tau for k in range(25))]
@@ -652,8 +661,8 @@ def chandelier(x, yv, z, name, radius=1.3, tiers=2, ring_mat="gold"):
             a = k / count * math.tau
             cx, cy = x + math.cos(a) * r, yv + math.sin(a) * r
             cyl("decor", "gold", (cx, cy, z + dz), (cx, cy, z + dz + 0.12), 0.07, seg=8, name=f"{name}_cup_{tier}_{k}")
-            cyl("decor", "candle", (cx, cy, z + dz + 0.12), (cx, cy, z + dz + 0.5), 0.035, seg=6, name=f"{name}_candle_{tier}_{k}")
-            cyl("decor", "flame", (cx, cy, z + dz + 0.5), (cx, cy, z + dz + 0.68), 0.035, seg=6, name=f"{name}_flame_{tier}_{k}", r2=0.0)
+            cyl("decor", "candle", (cx, cy, z + dz + 0.12), (cx, cy, z + dz + 0.42), 0.026, seg=6, name=f"{name}_candle_{tier}_{k}")
+            cyl("decor", "flame", (cx, cy, z + dz + 0.42), (cx, cy, z + dz + 0.58), 0.032, seg=6, name=f"{name}_flame_{tier}_{k}", r2=0.0)
         for k in range(4):
             a = k / 4 * math.tau + 0.4
             cyl("decor", "iron", (x + math.cos(a) * r, yv + math.sin(a) * r, z + dz), (x, yv, z + dz + 1.3), 0.015, seg=4, name=f"{name}_spoke_{tier}_{k}")
@@ -667,36 +676,54 @@ def chandelier(x, yv, z, name, radius=1.3, tiers=2, ring_mat="gold"):
     pw.empty(f"candle_{name}", (x, yv, z + 0.6))
 
 
-chandelier(0.0, -5.0, 11.0, "chandelier_0", radius=1.6, tiers=1, ring_mat="iron")
-chandelier(0.0, 9.0, 11.0, "chandelier_1", radius=1.6, tiers=1, ring_mat="iron")
-for k in range(4):
-    chandelier(0.0, Y_ARCH + (k + 1) * BAY + 2.25, 9.4, f"chandelier_second_{k}", radius=1.1, tiers=1, ring_mat="iron")
+chandelier(0.0, -5.0, 9.4, "chandelier_0", radius=1.8, tiers=1, ring_mat="iron")
+chandelier(0.0, 9.0, 9.4, "chandelier_1", radius=1.8, tiers=1, ring_mat="iron")
+for k in range(3):
+    chandelier(0.0, Y_ARCH + (k + 1) * BAY + 2.25, 9.0, f"chandelier_second_{k}", radius=1.2, tiers=1, ring_mat="iron", top=APEX2)
 
 # --- the centre of the hall: pedestal, ropes and the statue --------------------------------------
 PX, PY = 0.0, 7.0
-prism("decor", "plinth", (PX, PY), 2.9, 0.0, 0.22, 8, "pedestal_step", phase=math.radians(22.5))
-for r, z0, z1 in ((2.45, 0.22, 0.5), (2.0, 0.5, 0.78), (1.75, 0.78, 1.25)):
-    prism("decor", "stone_dark", (PX, PY), r, z0, z1, 8, f"pedestal_{z0}", phase=math.radians(22.5))
-box("solid", "collider", PX - 2.9, PX + 2.9, PY - 2.9, PY + 2.9, 0, 0.1, "pedestal_collider")
-box("decor", "brass", PX - 0.6, PX + 0.6, PY - 1.78, PY - 1.75, 0.82, 1.16, "plaque_back")
-quad("about_panel", "label", (PX, PY - 1.79, 0.99), 1.1, 0.3, "s")
-pw.empty("spot_about", (PX, PY - 4.8, 0))
-for k in range(10):
-    a = k / 10 * math.tau
-    sx, sy = PX + math.cos(a) * 3.3, PY + math.sin(a) * 3.3
-    cyl("decor", "brass", (sx, sy, 0.22), (sx, sy, 0.28), 0.18, seg=12, name=f"stanchion_base_{k}")
-    cyl("decor", "brass", (sx, sy, 0.28), (sx, sy, 1.15), 0.03, seg=8, name=f"stanchion_{k}")
+# the pedestal sits to the statue's measure: a rectangle with chamfered corners in four tiers,
+# longer across the nave because the hand truck trails to the east; the ropes follow it as a
+# rectangle, so their colliders match them exactly
+def plinth(name, hx, hy, z0, z1, chamfer, mat="stone_dark"):
     bm = bmesh.new()
-    pw.add_ico(bm, (sx, sy, 1.2), 0.06, 1)
+    pts = [(-hx + chamfer, -hy), (hx - chamfer, -hy), (hx, -hy + chamfer), (hx, hy - chamfer), (hx - chamfer, hy), (-hx + chamfer, hy), (-hx, hy - chamfer), (-hx, -hy + chamfer)]
+    vs = [bm.verts.new((PX + x, PY + y, z0)) for x, y in pts]
+    face = bm.faces.new(vs)
+    res = bmesh.ops.extrude_face_region(bm, geom=[face])
+    top = [g for g in res["geom"] if isinstance(g, bmesh.types.BMVert)]
+    bmesh.ops.translate(bm, verts=top, vec=Vector((0, 0, z1 - z0)))
+    bmesh.ops.recalc_face_normals(bm, faces=bm.faces[:])
+    return obj(name, bm, mat, "decor")
+
+
+TOP_HX, TOP_HY = 1.4, 1.0
+for k, (hx, hy, z0, z1, ch) in enumerate(((2.15, 1.75, 0.0, 0.22, 0.45), (1.9, 1.5, 0.22, 0.5, 0.4), (1.65, 1.25, 0.5, 0.78, 0.35), (TOP_HX, TOP_HY, 0.78, 1.25, 0.3))):
+    plinth(f"pedestal_{k}", hx, hy, z0, z1, ch)
+# a soft shadow of contact under the figure, so it sits on the stone instead of hovering
+quad("shadow_statue", "shadow_patch", (PX + 0.05, PY, 1.254), 2.6, 1.8, "up", group="decor")
+box("solid", "collider", PX - 2.15, PX + 2.15, PY - 1.75, PY + 1.75, 0, 1.25, "pedestal_collider")
+box("solid", "collider", PX - 1.25, PX + 1.25, PY - 0.85, PY + 0.85, 0, 4.4, "statue_collider")
+box("decor", "brass", PX - 0.6, PX + 0.6, PY - TOP_HY - 0.03, PY - TOP_HY, 0.82, 1.16, "plaque_back")
+quad("about_panel", "label", (PX, PY - TOP_HY - 0.04, 0.99), 1.1, 0.3, "s")
+pw.empty("spot_about", (PX, PY - 3.4, 0))
+RX, RY = 2.45, 2.1
+ring = [(-RX, -RY), (0, -RY), (RX, -RY), (RX, 0), (RX, RY), (0, RY), (-RX, RY), (-RX, 0)]
+for k, (rx, ry) in enumerate(ring):
+    sx, sy = PX + rx, PY + ry
+    cyl("decor", "brass", (sx, sy, 0.0), (sx, sy, 0.06), 0.18, seg=12, name=f"stanchion_base_{k}")
+    cyl("decor", "brass", (sx, sy, 0.06), (sx, sy, 0.95), 0.03, seg=8, name=f"stanchion_{k}")
+    bm = bmesh.new()
+    pw.add_ico(bm, (sx, sy, 1.0), 0.06, 1)
     obj(f"stanchion_knob_{k}", bm, "brass", "decor", smooth=True)
-    a2 = (k + 1) / 10 * math.tau
-    ex, ey = PX + math.cos(a2) * 3.3, PY + math.sin(a2) * 3.3
+    ex, ey = PX + ring[(k + 1) % len(ring)][0], PY + ring[(k + 1) % len(ring)][1]
     bm = bmesh.new()
-    pts = [Vector((sx + (ex - sx) * t, sy + (ey - sy) * t, 1.1 - 0.22 * math.sin(math.pi * t))) for t in (i / 6 for i in range(7))]
+    pts = [Vector((sx + (ex - sx) * t, sy + (ey - sy) * t, 0.9 - 0.22 * math.sin(math.pi * t))) for t in (i / 6 for i in range(7))]
     tube(bm, pts, 0.03, sides=6)
     obj(f"rope_{k}", bm, "velvet", "decor")
-for name_, (x0, x1, y0, y1) in {"ropes_s": (-3.4, 3.4, -3.4, -3.2), "ropes_n": (-3.4, 3.4, 3.2, 3.4), "ropes_w": (-3.4, -3.2, -3.4, 3.4), "ropes_e": (3.2, 3.4, -3.4, 3.4)}.items():
-    box("solid", "collider", PX + x0, PX + x1, PY + y0, PY + y1, 0, 0.1, name_)
+for name_, (x0, x1, y0, y1) in {"ropes_s": (-RX, RX, -RY - 0.05, -RY + 0.05), "ropes_n": (-RX, RX, RY - 0.05, RY + 0.05), "ropes_w": (-RX - 0.05, -RX + 0.05, -RY, RY), "ropes_e": (RX - 0.05, RX + 0.05, -RY, RY)}.items():
+    box("solid", "collider", PX + x0, PX + x1, PY + y0, PY + y1, 0, 0.95, name_)
 
 # the statue: a blocky figure in stone hauling an old computer on a cable, leaning into the pull
 base = 1.25
@@ -713,99 +740,133 @@ def statue_box(name, center, size, yaw=0.0, pitch=0.0):
     obj(name, bm, "statue", "decor")
 
 
-# the figure faces the entrance and leans hard into the pull; the hand truck with the computer
-# tilts behind it to the north, on two wheels
-fx, fy = PX - 0.25, PY - 0.3
-lean = math.radians(15)
-statue_box("statue_leg_back", (fx + 0.22, fy + 0.62, base + 0.5), (0.3, 0.3, 1.0), pitch=math.radians(26))
-statue_box("statue_foot_back", (fx + 0.22, fy + 0.9, base + 0.08), (0.32, 0.52, 0.16))
-statue_box("statue_leg_front", (fx - 0.22, fy - 0.34, base + 0.5), (0.3, 0.3, 1.0), pitch=math.radians(-12))
-statue_box("statue_foot_front", (fx - 0.22, fy - 0.56, base + 0.08), (0.32, 0.52, 0.16))
-statue_box("statue_hips", (fx, fy + 0.05, base + 1.04), (0.72, 0.42, 0.3), pitch=lean)
-statue_box("statue_waist", (fx, fy - 0.02, base + 1.3), (0.5, 0.34, 0.26), pitch=lean)
-statue_box("statue_torso", (fx + 0.04, fy - 0.22, base + 1.72), (0.86, 0.5, 0.74), pitch=lean)
-statue_box("statue_chest_plate", (fx + 0.04, fy - 0.5, base + 1.78), (0.56, 0.08, 0.44), pitch=lean)
-for sx in (-0.56, 0.64):
-    statue_box(f"statue_shoulder_{sx}", (fx + sx, fy - 0.3, base + 2.06), (0.34, 0.36, 0.3), pitch=lean)
-statue_box("statue_neck", (fx + 0.06, fy - 0.42, base + 2.28), (0.22, 0.22, 0.14), pitch=lean)
-# the head: a monitor with a bezel, a recessed dark screen, two eyes and a mouth
-statue_box("statue_head", (fx + 0.1, fy - 0.46, base + 2.62), (0.62, 0.56, 0.52), pitch=lean)
-statue_box("statue_head_bezel", (fx + 0.1, fy - 0.76, base + 2.62), (0.5, 0.06, 0.4), pitch=lean)
-box("decor", "screen", fx - 0.1, fx + 0.3, fy - 0.81, fy - 0.78, base + 2.47, base + 2.77, "statue_face")
-for ex in (fx + 0.0, fx + 0.2):
-    box("decor", "candle", ex - 0.04, ex + 0.04, fy - 0.82, fy - 0.81, base + 2.65, base + 2.71, f"statue_eye_{ex:.2f}")
-box("decor", "candle", fx + 0.03, fx + 0.17, fy - 0.82, fy - 0.81, base + 2.53, base + 2.55, "statue_mouth")
-# arms: the near one down and back to the truck's handle, the far one swinging forward
-statue_box("statue_arm_r", (fx + 0.66, fy + 0.02, base + 1.66), (0.22, 0.22, 0.8), pitch=math.radians(48))
-statue_box("statue_forearm_r", (fx + 0.66, fy + 0.5, base + 1.2), (0.2, 0.2, 0.7), pitch=math.radians(66))
-statue_box("statue_hand_r", (fx + 0.66, fy + 0.78, base + 0.92), (0.22, 0.26, 0.24))
-statue_box("statue_arm_l", (fx - 0.58, fy - 0.55, base + 1.7), (0.22, 0.22, 0.8), pitch=math.radians(-30))
-statue_box("statue_forearm_l", (fx - 0.58, fy - 0.9, base + 1.3), (0.2, 0.2, 0.7), pitch=math.radians(-55))
-statue_box("statue_hand_l", (fx - 0.58, fy - 1.1, base + 1.05), (0.22, 0.26, 0.24))
-# the hand truck: two wheels, an axle, a tilted frame with a nose plate, the computer strapped on
-tx, ty = PX + 0.9, PY + 0.95
-tilt = math.radians(32)
-for wx in (-1, 1):
-    cyl("decor", "statue", (tx + wx * 0.34, ty, base + 0.2), (tx + wx * 0.42, ty, base + 0.2), 0.2, seg=12, name=f"statue_wheel_{wx}")
-cyl("decor", "iron", (tx - 0.42, ty, base + 0.2), (tx + 0.42, ty, base + 0.2), 0.03, seg=6, name="statue_axle")
-for rx in (-0.26, 0.26):
-    statue_box(f"statue_truck_rail_{rx}", (tx + rx, ty - 0.1 - 0.95 * math.sin(tilt) * 0.5, base + 0.2 + 0.95 * math.cos(tilt) * 0.5 + 0.05), (0.06, 0.06, 1.9), pitch=-tilt)
-statue_box("statue_truck_nose", (tx, ty - 0.42, base + 0.14), (0.62, 0.5, 0.05), pitch=-tilt)
-statue_box("statue_truck_handle", (tx, ty - 0.1 - 1.9 * math.sin(tilt) * 0.5 - 0.05, base + 0.2 + 1.9 * math.cos(tilt) * 0.5 + 0.1), (0.62, 0.06, 0.06), pitch=-tilt)
-statue_box("statue_computer", (tx, ty - 0.46 + 0.1, base + 0.5), (0.7, 0.56, 0.62), pitch=-tilt)
-box("decor", "screen", tx - 0.24, tx + 0.24, ty - 0.86, ty - 0.84, base + 0.42, base + 0.8, "statue_computer_screen")
-statue_box("statue_keyboard", (tx, ty - 0.1, base + 0.92), (0.56, 0.28, 0.05), pitch=-tilt)
-bm = bmesh.new()
-pull = [Vector((fx + 0.66 + (tx - fx - 0.66) * t, fy + 0.78 + (ty - 1.0 - fy - 0.78) * t, base + 0.92 + (base + 1.1 - base - 0.92) * t - 0.1 * math.sin(math.pi * t))) for t in (i / 8 for i in range(9))]
-tube(bm, pull, 0.03, sides=5)
-obj("statue_cable", bm, "iron", "decor")
+STATUE_GLB = os.path.join(ASSETS, "trellis", "statue.glb")
+if os.path.exists(STATUE_GLB):
+    # the statue generated from the reference crop with TRELLIS.2 (see tools/assets/trellis/README.md)
+    STATUE_SCALE, STATUE_YAW = 1.0, 0.0
+    place_asset("trellis/statue", (PX, PY, base), scale=STATUE_SCALE, yaw=STATUE_YAW, name="statue_generated")
+else:
+    # the figure faces the entrance and leans hard into the pull; the hand truck with the computer
+    # tilts behind it to the north, on two wheels
+    fx, fy = PX - 0.25, PY - 0.3
+    lean = math.radians(15)
+    statue_box("statue_leg_back", (fx + 0.22, fy + 0.62, base + 0.5), (0.3, 0.3, 1.0), pitch=math.radians(26))
+    statue_box("statue_foot_back", (fx + 0.22, fy + 0.9, base + 0.08), (0.32, 0.52, 0.16))
+    statue_box("statue_leg_front", (fx - 0.22, fy - 0.34, base + 0.5), (0.3, 0.3, 1.0), pitch=math.radians(-12))
+    statue_box("statue_foot_front", (fx - 0.22, fy - 0.56, base + 0.08), (0.32, 0.52, 0.16))
+    statue_box("statue_hips", (fx, fy + 0.05, base + 1.04), (0.72, 0.42, 0.3), pitch=lean)
+    statue_box("statue_waist", (fx, fy - 0.02, base + 1.3), (0.5, 0.34, 0.26), pitch=lean)
+    statue_box("statue_torso", (fx + 0.04, fy - 0.22, base + 1.72), (0.86, 0.5, 0.74), pitch=lean)
+    statue_box("statue_chest_plate", (fx + 0.04, fy - 0.5, base + 1.78), (0.56, 0.08, 0.44), pitch=lean)
+    for sx in (-0.56, 0.64):
+        statue_box(f"statue_shoulder_{sx}", (fx + sx, fy - 0.3, base + 2.06), (0.34, 0.36, 0.3), pitch=lean)
+    statue_box("statue_neck", (fx + 0.06, fy - 0.42, base + 2.28), (0.22, 0.22, 0.14), pitch=lean)
+    # the head: a monitor with a bezel, a recessed dark screen, two eyes and a mouth
+    statue_box("statue_head", (fx + 0.1, fy - 0.46, base + 2.62), (0.62, 0.56, 0.52), pitch=lean)
+    statue_box("statue_head_bezel", (fx + 0.1, fy - 0.76, base + 2.62), (0.5, 0.06, 0.4), pitch=lean)
+    box("decor", "screen", fx - 0.1, fx + 0.3, fy - 0.81, fy - 0.78, base + 2.47, base + 2.77, "statue_face")
+    for ex in (fx + 0.0, fx + 0.2):
+        box("decor", "candle", ex - 0.04, ex + 0.04, fy - 0.82, fy - 0.81, base + 2.65, base + 2.71, f"statue_eye_{ex:.2f}")
+    box("decor", "candle", fx + 0.03, fx + 0.17, fy - 0.82, fy - 0.81, base + 2.53, base + 2.55, "statue_mouth")
+    # arms: the near one down and back to the truck's handle, the far one swinging forward
+    statue_box("statue_arm_r", (fx + 0.66, fy + 0.02, base + 1.66), (0.22, 0.22, 0.8), pitch=math.radians(48))
+    statue_box("statue_forearm_r", (fx + 0.66, fy + 0.5, base + 1.2), (0.2, 0.2, 0.7), pitch=math.radians(66))
+    statue_box("statue_hand_r", (fx + 0.66, fy + 0.78, base + 0.92), (0.22, 0.26, 0.24))
+    statue_box("statue_arm_l", (fx - 0.58, fy - 0.55, base + 1.7), (0.22, 0.22, 0.8), pitch=math.radians(-30))
+    statue_box("statue_forearm_l", (fx - 0.58, fy - 0.9, base + 1.3), (0.2, 0.2, 0.7), pitch=math.radians(-55))
+    statue_box("statue_hand_l", (fx - 0.58, fy - 1.1, base + 1.05), (0.22, 0.26, 0.24))
+    # the hand truck: two wheels, an axle, a tilted frame with a nose plate, the computer strapped on
+    tx, ty = PX + 0.9, PY + 0.95
+    tilt = math.radians(32)
+    for wx in (-1, 1):
+        cyl("decor", "statue", (tx + wx * 0.34, ty, base + 0.2), (tx + wx * 0.42, ty, base + 0.2), 0.2, seg=12, name=f"statue_wheel_{wx}")
+    cyl("decor", "iron", (tx - 0.42, ty, base + 0.2), (tx + 0.42, ty, base + 0.2), 0.03, seg=6, name="statue_axle")
+    for rx in (-0.26, 0.26):
+        statue_box(f"statue_truck_rail_{rx}", (tx + rx, ty - 0.1 - 0.95 * math.sin(tilt) * 0.5, base + 0.14 + 0.95 * math.cos(tilt)), (0.06, 0.06, 1.9), pitch=-tilt)
+    statue_box("statue_truck_nose", (tx, ty - 0.42, base + 0.14), (0.62, 0.5, 0.05), pitch=-tilt)
+    statue_box("statue_truck_handle", (tx, ty - 0.1 - 1.9 * math.sin(tilt) * 0.5 - 0.05, base + 0.2 + 1.9 * math.cos(tilt) * 0.5 + 0.1), (0.62, 0.06, 0.06), pitch=-tilt)
+    statue_box("statue_computer", (tx, ty - 0.46 + 0.1, base + 0.5), (0.7, 0.56, 0.62), pitch=-tilt)
+    box("decor", "screen", tx - 0.24, tx + 0.24, ty - 0.86, ty - 0.84, base + 0.42, base + 0.8, "statue_computer_screen")
+    statue_box("statue_keyboard", (tx, ty - 0.1, base + 0.92), (0.56, 0.28, 0.05), pitch=-tilt)
+    bm = bmesh.new()
+    pull = [Vector((fx + 0.66 + (tx - fx - 0.66) * t, fy + 0.78 + (ty - 1.0 - fy - 0.78) * t, base + 0.92 + (base + 1.1 - base - 0.92) * t - 0.1 * math.sin(math.pi * t))) for t in (i / 8 for i in range(9))]
+    tube(bm, pull, 0.03, sides=5)
+    obj("statue_cable", bm, "iron", "decor")
 
 # --- glass cases with open books: the experience ---------------------------------------------------
-# along the walls at the piers, their long side parallel to the wall
-cases = [(-1, -4.5), (1, -4.5), (-1, 9.0), (1, 9.0), (-1, Y_ARCH + 2.5 * BAY)]
-for i, (side, yc) in enumerate(cases):
-    x = side * (HW - 0.95) if yc < Y_ARCH else side * (HW2 - 0.9)
+# the cabinets of the experience stand in the second room, between the arcade piers on both sides,
+# so the nave keeps its paintings and its statue as the only exhibits
+# two cabinets a side, facing each other across the room, and the current post in a table case in
+# the middle; the order round the room runs from the oldest post by the arch on the west to the
+# newest in the centre: the reader stands on the side the plaque faces
+X_CASE = HW2 - 0.95
+layout = [
+    (0, -X_CASE, Y_ARCH + 2.5 * BAY, "e"),
+    (1, -X_CASE, Y_ARCH + 4.5 * BAY, "e"),
+    (4, 0.0, Y_ARCH + 3.5 * BAY, "s"),
+    (2, X_CASE, Y_ARCH + 4.5 * BAY, "w"),
+    (3, X_CASE, Y_ARCH + 2.5 * BAY, "w"),
+]
+for i, cx, cy, reader in layout:
+    rdx, rdy = {"e": (1, 0), "w": (-1, 0), "s": (0, -1)}[reader]
     top = 2.1 if i == 1 else 1.65
-    box("solid", "plinth", x - 0.55, x + 0.55, yc - 0.85, yc + 0.85, 0, 0.95, f"case_plinth_{i}")
-    box("decor", "iron", x - 0.59, x + 0.59, yc - 0.89, yc + 0.89, 0.93, 0.98, f"case_lip_{i}")
-    box("decor", "case_glass", x - 0.53, x + 0.53, yc - 0.83, yc + 0.83, 0.98, top, f"case_glass_{i}")
-    for px_, py_ in ((x - 0.53, yc - 0.83), (x + 0.53, yc - 0.83), (x - 0.53, yc + 0.83), (x + 0.53, yc + 0.83)):
-        box("decor", "iron", px_ - 0.02, px_ + 0.02, py_ - 0.02, py_ + 0.02, 0.98, top + 0.02, f"case_post_{i}_{px_:.1f}_{py_:.1f}")
-    for (ex0, ex1, ey0, ey1) in ((x - 0.55, x + 0.55, yc - 0.85, yc - 0.81), (x - 0.55, x + 0.55, yc + 0.81, yc + 0.85), (x - 0.55, x - 0.51, yc - 0.85, yc + 0.85), (x + 0.51, x + 0.55, yc - 0.85, yc + 0.85)):
-        box("decor", "iron", ex0, ex1, ey0, ey1, top, top + 0.04)
-    box("decor", "velvet", x - 0.45, x + 0.45, yc - 0.75, yc + 0.75, 0.98, 1.02, f"case_cloth_{i}")
+
+    def rect(u0, u1, v0, v1):
+        """u runs along the long side, v across it towards the reader; world bounds back."""
+        if rdx:
+            xs, ys = (cx + v0 * rdx, cx + v1 * rdx), (cy + u0, cy + u1)
+        else:
+            xs, ys = (cx + u0, cx + u1), (cy + v0 * rdy, cy + v1 * rdy)
+        return min(xs), max(xs), min(ys), max(ys)
+
+    def point(u, v, z):
+        return (cx + v * rdx, cy + u, z) if rdx else (cx + u, cy + v * rdy, z)
+
+    # the cabinet: dark wood on a stone base, with recessed panels and a brass lip
+    box("solid", "collider", *rect(-0.9, 0.9, -0.6, 0.6), 0, top, f"case_collider_{i}")
+    box("decor", "stone_dark", *rect(-0.9, 0.9, -0.6, 0.6), 0, 0.12, f"case_base_{i}")
+    box("decor", "wood", *rect(-0.85, 0.85, -0.55, 0.55), 0.12, 0.92, f"case_body_{i}")
+    for sv in (-1, 1):
+        for (u0, u1) in ((-0.78, -0.1), (0.1, 0.78)):
+            box("decor", "wood", *rect(u0, u1, sv * 0.55, sv * 0.58), 0.22, 0.82, f"case_panel_{i}_{sv}_{u0:.1f}")
+    for su in (-1, 1):
+        box("decor", "wood", *rect(su * 0.85, su * 0.88, -0.45, 0.45), 0.22, 0.82, f"case_panel_end_{i}_{su}")
+    box("decor", "brass", *rect(-0.9, 0.9, -0.6, 0.6), 0.92, 0.97, f"case_lip_{i}")
+    box("decor", "velvet", *rect(-0.8, 0.8, -0.5, 0.5), 0.97, 1.0, f"case_cloth_{i}")
+    # the glass top in a brass frame
+    box("decor", "case_glass", *rect(-0.82, 0.82, -0.52, 0.52), 1.0, top, f"case_glass_{i}")
+    for pu, pv in ((-0.83, -0.53), (0.83, -0.53), (-0.83, 0.53), (0.83, 0.53)):
+        box("decor", "brass", *rect(pu - 0.025, pu + 0.025, pv - 0.025, pv + 0.025), 0.97, top + 0.03, f"case_post_{i}_{pu:.1f}_{pv:.1f}")
+    for (u0, u1, v0, v1) in ((-0.85, 0.85, -0.55, -0.51), (-0.85, 0.85, 0.51, 0.55), (-0.85, -0.81, -0.55, 0.55), (0.81, 0.85, -0.55, 0.55)):
+        box("decor", "brass", *rect(u0, u1, v0, v1), top, top + 0.04)
+    page_yaw = {"e": math.pi / 2, "w": -math.pi / 2, "s": 0.0}[reader]
     if i == 1:
-        # the retro computer (Poly Haven, CC0) on the cloth, the page as a card in front of it
-        place_asset("television_02", (x, yc + 0.3, 1.02), scale=1.25, yaw=math.radians(-90), name="case_computer")
-        quad(f"exp_{i}", "lightbox", (x + side * 0.02, yc - 0.42, 1.16), 0.72, 0.45, "up", yaw=-side * math.pi / 2)
-        quad(f"plaque_exp_{i}", "label", (x - side * 0.56, yc, 0.6), 0.5, 0.2, "e" if side < 0 else "w", group="decor")
-        pw.empty(f"spot_exp_{i}", (x - side * 1.7, yc, 0))
-        continue
-    # an open book on a low slanted stand: two leaves rising in a V from the spine, the page on top
-    facing = "e" if side < 0 else "w"
-    box("decor", "wood", x - 0.3, x + 0.3, yc - 0.42, yc + 0.42, 1.02, 1.08, f"book_stand_{i}")
-    bm = bmesh.new()
-    for leaf in (-1, 1):
-        vs = pw.add_box(bm, (0, 0, 0), (0.56, 0.4, 0.08), 0.0)
-        bmesh.ops.rotate(bm, verts=vs, cent=(0, 0, 0), matrix=Matrix.Rotation(leaf * math.radians(7), 3, "X"))
-        bmesh.ops.translate(bm, verts=vs, vec=Vector((x, yc + leaf * 0.21, 1.14)))
-    obj(f"book_block_{i}", bm, "paper", "decor")
-    box("decor", "wood", x - 0.29, x + 0.29, yc - 0.03, yc + 0.03, 1.08, 1.12, f"book_spine_{i}")
-    quad(f"exp_{i}", "lightbox", (x + side * 0.02, yc, 1.205), 0.8, 0.5, "up", yaw=-side * math.pi / 2)
-    quad(f"plaque_exp_{i}", "label", (x - side * 0.56, yc, 0.6), 0.5, 0.2, facing, group="decor")
-    pw.empty(f"spot_exp_{i}", (x - side * 1.7, yc, 0))
+        # the retro computer (Poly Haven, CC0) on the cloth, its screen to the reader, the page in front
+        place_asset("polyhaven/television_02", point(0.3, 0.0, 1.0), scale=1.25, yaw={"w": 0.0, "e": math.pi, "s": math.pi / 2}[reader], name="case_computer")
+        quad(f"exp_{i}", "lightbox", point(-0.42, -0.02, 1.005), 0.72, 0.45, "up", yaw=page_yaw)
+    else:
+        # an open book on a low slanted stand: two leaves rising in a V from the spine, the page on top
+        box("decor", "wood", *rect(-0.42, 0.42, -0.3, 0.3), 1.0, 1.06, f"book_stand_{i}")
+        bm = bmesh.new()
+        for leaf in (-1, 1):
+            if rdx:
+                vs = pw.add_box(bm, (0, 0, 0), (0.56, 0.4, 0.08), 0.0)
+                bmesh.ops.rotate(bm, verts=vs, cent=(0, 0, 0), matrix=Matrix.Rotation(leaf * math.radians(7), 3, "X"))
+            else:
+                vs = pw.add_box(bm, (0, 0, 0), (0.4, 0.56, 0.08), 0.0)
+                bmesh.ops.rotate(bm, verts=vs, cent=(0, 0, 0), matrix=Matrix.Rotation(-leaf * math.radians(7), 3, "Y"))
+            bmesh.ops.translate(bm, verts=vs, vec=Vector(point(leaf * 0.21, 0.0, 1.12)))
+        obj(f"book_block_{i}", bm, "paper", "decor")
+        box("decor", "wood", *rect(-0.29, 0.29, -0.03, 0.03), 1.06, 1.1, f"book_spine_{i}")
+        quad(f"exp_{i}", "lightbox", point(0.0, -0.02, 1.185), 0.8, 0.5, "up", yaw=page_yaw)
+    # a brass plaque on the reader's side, and where the visitor stands
+    box("decor", "brass", *rect(-0.3, 0.3, 0.58, 0.6), 0.66, 0.9, f"case_plaque_back_{i}")
+    quad(f"plaque_exp_{i}", "label", point(0.0, 0.605, 0.78), 0.56, 0.22, reader, group="decor")
+    pw.empty(f"spot_exp_{i}", point(0.0, 1.7, 0.0))
 
-# --- busts, bench and the lectern ---------------------------------------------------------------------
-busts = [(-1, -13.5), (1, -13.5), (-1, 0.0), (1, 0.0), (-1, 13.5), (1, 13.5), (-1, Y_ARCH + 1.5 * BAY), (1, Y_ARCH + 1.5 * BAY)]
-for i, (side, yc) in enumerate(busts):
-    x = side * (HW - PIER_D - 0.65) if yc < Y_ARCH else side * (HW2 - 0.75)
-    box("solid", "plinth", x - 0.3, x + 0.3, yc - 0.3, yc + 0.3, 0, 1.35, f"bust_pedestal_{i}")
-    box("decor", "stone_dark", x - 0.34, x + 0.34, yc - 0.34, yc + 0.34, 1.35, 1.42, f"bust_cap_{i}")
-    # a Renaissance marble bust (Poly Haven, CC0) at life size, looking into the nave
-    place_asset("marble_bust_01", (x, yc, 1.42), scale=1.35, yaw=math.radians(90 if side < 0 else -90), name=f"bust_{i}")
-
+# --- the bench and the lectern ---------------------------------------------------------------------
 # the bench on the open floor to the left of the entrance, across the nave, with open trapezoid legs
-BX0, BX1, BY0, BY1 = -4.4, -2.0, -8.7, -8.0
+BX0, BX1, BY0, BY1 = -4.4, -2.0, -15.9, -15.2
 box("decor", "wood", BX0, BX1, BY0, BY1, 0.4, 0.48, "bench")
 box("decor", "velvet", BX0 + 0.05, BX1 - 0.05, BY0 + 0.05, BY1 - 0.05, 0.48, 0.6, "bench_cushion")
 for sx in (BX0 + 0.3, BX1 - 0.3):
@@ -817,9 +878,9 @@ for sx in (BX0 + 0.3, BX1 - 0.3):
     bm.faces.new(verts_top)
     bmesh.ops.recalc_face_normals(bm, faces=bm.faces[:])
     obj(f"bench_leg_{sx:.1f}", bm, "wood", "decor")
-box("solid", "collider", BX0 - 0.1, BX1 + 0.1, BY0 - 0.2, BY1 + 0.2, 0, 0.1, "bench_collider")
+box("solid", "collider", BX0 - 0.1, BX1 + 0.1, BY0 - 0.2, BY1 + 0.2, 0, 0.5, "bench_collider")
 
-LX, LY = 4.6, -16.2
+LX, LY = 0.0, -15.6
 box("solid", "wood", LX - 0.3, LX + 0.3, LY - 0.3, LY + 0.3, 0, 0.1, "lectern")
 box("decor", "wood", LX - 0.3, LX + 0.3, LY - 0.3, LY + 0.3, 0, 0.12, "lectern_base")
 cyl("decor", "wood", (LX, LY, 0.12), (LX, LY, 1.0), 0.09, seg=10, name="lectern_column")
@@ -828,17 +889,18 @@ vs = pw.add_box(bm, (0, 0, 0), (0.9, 0.62, 0.06), 0.0)
 bmesh.ops.rotate(bm, verts=vs, cent=(0, 0, 0), matrix=Matrix.Rotation(math.radians(-22), 3, "X"))
 bmesh.ops.translate(bm, verts=vs, vec=Vector((LX, LY, 1.1)))
 obj("lectern_top", bm, "wood", "decor")
-quad("contact_panel", "label", (LX, LY, 1.135), 0.8, 0.5, "up", group="exhibits", tilt=math.radians(-22), yaw=math.pi)
+quad("contact_panel", "label", (LX, LY, 1.135), 0.8, 0.5, "up", group="exhibits", tilt=math.radians(22), yaw=math.pi)
 pw.empty("spot_contact", (LX, LY + 1.4, 0))
-quad("sign_wing", "label", (-HW + 0.03, -16.0, 1.5), 1.6, 0.44, "e")
-pw.empty("spawn", (0, -6.0, 0))
+box("decor", "brass", LX - 0.36, LX + 0.36, LY - 0.33, LY - 0.3, 0.72, 0.98, "lectern_sign_back")
+quad("sign_contact", "label", (LX, LY - 0.335, 0.85), 0.7, 0.24, "s")
+pw.empty("spawn", (1.5, -6.0, 0))
 
 for template in _asset_templates:
     bpy.data.objects.remove(template, do_unlink=True)
 
 # the decor is some 1800 small meshes; joined per material they become a few dozen draw calls, and
 # the runtime still finds everything it needs by name (exhibits, glass, panels, signs, empties)
-KEEP_APART = ("glass_", "canvas_", "label_", "exp_", "plaque_", "deco_canvas", "about_panel", "contact_panel", "sign_")
+KEEP_APART = ("glass_", "canvas_", "label_", "exp_", "plaque_", "deco_canvas", "about_panel", "contact_panel", "sign_", "shadow_")
 by_material = {}
 for o in list(groups["decor"].children):
     if o.type != "MESH" or o.name.startswith(KEEP_APART):

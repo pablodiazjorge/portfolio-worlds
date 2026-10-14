@@ -49,3 +49,6 @@ __pycache__/
 # System files
 .DS_Store
 Thumbs.db
+
+# raw generations kept beside the prepared asset, never committed
+tools/assets/**/*_raw.glb

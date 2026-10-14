@@ -246,90 +246,253 @@ export function drawStainedGlass(canvas: HTMLCanvasElement, spec: GlassSpec): vo
   }
 }
 
-/** A small landscape in oils: a warm sky, far hills, a river and a town with towers. */
+/**
+ * A landscape in oils, one of four compositions chosen by the seed: a walled city with a bridge, a
+ * river winding past towers, a dark forest with a clearing, or a village on a hill. Deep greens, an
+ * ultramarine sky warming towards the horizon, and a dark varnish vignette round the edges.
+ */
 export function drawLandscape(canvas: HTMLCanvasElement, W: number, H: number, seed: number): void {
   canvas.width = W;
   canvas.height = H;
   const ctx = canvas.getContext('2d')!;
   const rnd = mulberry(seed);
-  const sky = ctx.createLinearGradient(0, 0, 0, H * 0.55);
-  sky.addColorStop(0, '#5f87c4');
-  sky.addColorStop(0.6, '#d9c7a4');
-  sky.addColorStop(1, '#f1d9a8');
+  const kind = seed % 4;
+  const horizon = H * (0.5 + (kind === 3 ? 0.06 : 0));
+  const sky = ctx.createLinearGradient(0, 0, 0, horizon);
+  sky.addColorStop(0, '#2d4f8f');
+  sky.addColorStop(0.55, '#7f9ac0');
+  sky.addColorStop(1, '#e0b57a');
   ctx.fillStyle = sky;
   ctx.fillRect(0, 0, W, H);
-  // clouds
-  for (let i = 0; i < 9; i++) {
+  for (let i = 0; i < 7; i++) {
     const x = rnd() * W;
-    const y = H * (0.08 + rnd() * 0.3);
-    const r = W * (0.05 + rnd() * 0.08);
-    ctx.fillStyle = `rgba(255,245,230,${0.5 + rnd() * 0.4})`;
-    for (let k = 0; k < 4; k++) {
+    const y = horizon * (0.15 + rnd() * 0.55);
+    const r = W * (0.05 + rnd() * 0.09);
+    for (let k = 0; k < 5; k++) {
+      ctx.fillStyle = `rgba(${235 + Math.round(rnd() * 20)},${215 + Math.round(rnd() * 25)},${190 + Math.round(rnd() * 30)},${0.35 + rnd() * 0.35})`;
       ctx.beginPath();
-      ctx.arc(x + (rnd() - 0.5) * r * 2, y + (rnd() - 0.5) * r * 0.6, r * (0.5 + rnd() * 0.5), 0, Math.PI * 2);
+      ctx.arc(x + (rnd() - 0.5) * r * 2.4, y + (rnd() - 0.5) * r * 0.5, r * (0.4 + rnd() * 0.5), 0, Math.PI * 2);
       ctx.fill();
     }
   }
-  // far hills in two planes
-  for (const [yBase, colour, amp] of [[0.5, '#8aa1b8', 0.06], [0.58, '#6f8b63', 0.05]] as const) {
+  // far hills in two planes, bluer behind, greener in front
+  const hills = (yBase: number, colour: string, amp: number, freq: number) => {
     ctx.fillStyle = colour;
     ctx.beginPath();
     ctx.moveTo(0, H);
-    for (let x = 0; x <= W; x += W / 24) {
-      ctx.lineTo(x, H * yBase - Math.abs(Math.sin(x / W * 7 + seed)) * H * amp - rnd() * H * 0.01);
+    for (let x = 0; x <= W; x += W / 32) {
+      ctx.lineTo(x, yBase - Math.abs(Math.sin((x / W) * freq + seed)) * H * amp - rnd() * H * 0.008);
     }
     ctx.lineTo(W, H);
     ctx.closePath();
     ctx.fill();
-  }
-  // the town: a wall and towers with spires on the skyline
-  ctx.fillStyle = '#8c7a62';
-  ctx.fillRect(W * 0.1, H * 0.56, W * 0.8, H * 0.08);
-  for (let i = 0; i < 7; i++) {
-    const x = W * (0.12 + i * 0.11 + rnd() * 0.03);
-    const w = W * (0.04 + rnd() * 0.03);
-    const h = H * (0.08 + rnd() * 0.12);
-    ctx.fillStyle = i % 2 ? '#a08b6e' : '#7f6c55';
-    ctx.fillRect(x, H * 0.6 - h, w, h);
-    ctx.fillStyle = '#5a4a3a';
+  };
+  hills(horizon * 0.98, '#7f93ad', 0.09, 5);
+  hills(horizon * 1.06, '#5f7f58', 0.07, 8);
+  if (kind === 0) {
+    // the walled city with its bridge over a river
+    ctx.fillStyle = '#8a7658';
+    ctx.fillRect(W * 0.1, horizon * 1.08, W * 0.8, H * 0.07);
+    for (let i = 0; i < 8; i++) {
+      const x = W * (0.1 + i * 0.1 + rnd() * 0.03);
+      const w = W * (0.035 + rnd() * 0.03);
+      const h = H * (0.07 + rnd() * 0.13);
+      ctx.fillStyle = i % 2 ? '#a28e6f' : '#7c6a52';
+      ctx.fillRect(x, horizon * 1.1 - h, w, h);
+      ctx.fillStyle = '#4a3a2c';
+      ctx.beginPath();
+      ctx.moveTo(x - w * 0.1, horizon * 1.1 - h);
+      ctx.lineTo(x + w / 2, horizon * 1.1 - h - H * (0.04 + rnd() * 0.06));
+      ctx.lineTo(x + w * 1.1, horizon * 1.1 - h);
+      ctx.closePath();
+      ctx.fill();
+    }
+  } else if (kind === 1) {
+    // a few tall towers on a headland
+    for (let i = 0; i < 3; i++) {
+      const x = W * (0.55 + i * 0.13);
+      const w = W * 0.06;
+      const h = H * (0.16 + rnd() * 0.1);
+      ctx.fillStyle = '#8c7a5c';
+      ctx.fillRect(x, horizon * 1.12 - h, w, h);
+      ctx.fillStyle = '#4a3a2c';
+      ctx.beginPath();
+      ctx.moveTo(x - w * 0.15, horizon * 1.12 - h);
+      ctx.lineTo(x + w / 2, horizon * 1.12 - h - H * 0.07);
+      ctx.lineTo(x + w * 1.15, horizon * 1.12 - h);
+      ctx.closePath();
+      ctx.fill();
+    }
+  } else if (kind === 3) {
+    // the village on its hill
+    ctx.fillStyle = '#6a8a4e';
     ctx.beginPath();
-    ctx.moveTo(x - w * 0.1, H * 0.6 - h);
-    ctx.lineTo(x + w / 2, H * 0.6 - h - H * (0.04 + rnd() * 0.05));
-    ctx.lineTo(x + w * 1.1, H * 0.6 - h);
+    ctx.moveTo(W * 0.15, H);
+    ctx.quadraticCurveTo(W * 0.5, horizon * 0.72, W * 0.85, H);
     ctx.closePath();
     ctx.fill();
+    for (let i = 0; i < 9; i++) {
+      const t = i / 8;
+      const x = W * (0.3 + t * 0.4);
+      const y = horizon * (0.86 + Math.abs(t - 0.5) * 0.3);
+      const w = W * (0.03 + rnd() * 0.02);
+      ctx.fillStyle = i % 3 ? '#d9c6a0' : '#b89f74';
+      ctx.fillRect(x, y - H * 0.05, w, H * 0.05);
+      ctx.fillStyle = '#7a3b2a';
+      ctx.beginPath();
+      ctx.moveTo(x - w * 0.1, y - H * 0.05);
+      ctx.lineTo(x + w / 2, y - H * 0.085);
+      ctx.lineTo(x + w * 1.1, y - H * 0.05);
+      ctx.closePath();
+      ctx.fill();
+    }
   }
-  // the river with a bridge, and the meadow
-  ctx.fillStyle = '#6f9a5a';
-  ctx.fillRect(0, H * 0.64, W, H * 0.36);
-  const river = ctx.createLinearGradient(0, H * 0.66, 0, H);
-  river.addColorStop(0, '#9bb8d2');
-  river.addColorStop(1, '#5a7fa3');
-  ctx.fillStyle = river;
-  ctx.beginPath();
-  ctx.moveTo(W * 0.35, H * 0.66);
-  ctx.lineTo(W * 0.62, H * 0.66);
-  ctx.lineTo(W * 0.95, H);
-  ctx.lineTo(W * 0.05, H);
-  ctx.closePath();
-  ctx.fill();
-  ctx.fillStyle = '#9c8a70';
-  ctx.fillRect(W * 0.2, H * 0.74, W * 0.62, H * 0.03);
-  for (let i = 0; i < 4; i++) {
-    ctx.fillStyle = '#5a7fa3';
+  // the meadow, the water and the trees
+  ctx.fillStyle = kind === 2 ? '#3f5e35' : '#5e8a48';
+  ctx.fillRect(0, horizon * 1.14, W, H);
+  if (kind !== 2 && kind !== 3) {
+    const river = ctx.createLinearGradient(0, horizon * 1.16, 0, H);
+    river.addColorStop(0, '#8fb0cc');
+    river.addColorStop(1, '#3e6189');
+    ctx.fillStyle = river;
     ctx.beginPath();
-    ctx.arc(W * (0.28 + i * 0.15), H * 0.78, W * 0.045, Math.PI, 0);
+    ctx.moveTo(W * (kind === 1 ? 0.0 : 0.35), horizon * 1.16);
+    ctx.lineTo(W * (kind === 1 ? 0.5 : 0.62), horizon * 1.16);
+    ctx.lineTo(W * 0.95, H);
+    ctx.lineTo(W * 0.05, H);
+    ctx.closePath();
     ctx.fill();
+    if (kind === 0) {
+      ctx.fillStyle = '#9c8a70';
+      ctx.fillRect(W * 0.2, horizon * 1.3, W * 0.62, H * 0.03);
+      for (let i = 0; i < 4; i++) {
+        ctx.fillStyle = '#3e6189';
+        ctx.beginPath();
+        ctx.arc(W * (0.28 + i * 0.15), horizon * 1.36, W * 0.045, Math.PI, 0);
+        ctx.fill();
+      }
+    }
   }
-  // trees and a warm glaze, like varnish
-  for (let i = 0; i < 12; i++) {
+  const trees = kind === 2 ? 40 : 14;
+  for (let i = 0; i < trees; i++) {
     const x = rnd() * W;
-    const y = H * (0.66 + rnd() * 0.3);
-    ctx.fillStyle = i % 2 ? '#3f6b3a' : '#5b8a4a';
+    const y = horizon * 1.12 + rnd() * (H - horizon * 1.12);
+    const r = W * (0.02 + rnd() * 0.04) * (kind === 2 ? 1.5 : 1);
+    ctx.fillStyle = i % 2 ? '#2f4f2a' : '#476d3a';
     ctx.beginPath();
-    ctx.arc(x, y, W * (0.02 + rnd() * 0.03), 0, Math.PI * 2);
+    ctx.arc(x, y, r, 0, Math.PI * 2);
     ctx.fill();
+    ctx.fillStyle = '#3a2a1a';
+    ctx.fillRect(x - r * 0.1, y, r * 0.2, r * 0.8);
   }
-  ctx.fillStyle = 'rgba(190,140,70,0.16)';
+  // the varnish: a warm glaze and dark edges
+  ctx.fillStyle = 'rgba(150,100,40,0.12)';
   ctx.fillRect(0, 0, W, H);
+  const vignette = ctx.createRadialGradient(W / 2, H / 2, H * 0.3, W / 2, H / 2, H * 0.9);
+  vignette.addColorStop(0, 'rgba(30,15,5,0)');
+  vignette.addColorStop(1, 'rgba(30,15,5,0.6)');
+  ctx.fillStyle = vignette;
+  ctx.fillRect(0, 0, W, H);
+}
+
+/**
+ * A project painted the way the gallery's pictures are: a landscape in oils with a gilt roundel
+ * holding the project's mark, and a parchment cartouche with its title and tagline in Garamond.
+ * `cover` is the project's cover image, if it has loaded; the roundel takes its centre.
+ */
+export function drawPainting(canvas: HTMLCanvasElement, W: number, H: number, title: string, tagline: string, seed: number, cover: HTMLImageElement | null): void {
+  const back = document.createElement('canvas');
+  drawLandscape(back, W, H, seed);
+  canvas.width = W;
+  canvas.height = H;
+  const ctx = canvas.getContext('2d')!;
+  ctx.drawImage(back, 0, 0);
+  const rnd = mulberry(seed * 7 + 3);
+  // the roundel: a gilt ring with the project's mark on a dark ground, hung in the sky
+  const cx = W / 2;
+  const cy = H * 0.27;
+  const r = H * 0.15;
+  ctx.save();
+  ctx.beginPath();
+  ctx.arc(cx, cy, r, 0, Math.PI * 2);
+  ctx.clip();
+  ctx.fillStyle = '#1b2538';
+  ctx.fillRect(cx - r, cy - r, r * 2, r * 2);
+  if (cover) {
+    const side = cover.height * 0.34;
+    ctx.drawImage(cover, cover.width / 2 - side / 2, cover.height * 0.32 - side / 2, side, side, cx - r * 0.92, cy - r * 0.92, r * 1.84, r * 1.84);
+  }
+  ctx.restore();
+  for (const [radius, width, colour] of [[r + 8, 14, '#9a7a2c'], [r + 8, 6, '#e3c05f'], [r - 2, 3, '#6b5320']] as const) {
+    ctx.strokeStyle = colour;
+    ctx.lineWidth = width;
+    ctx.beginPath();
+    ctx.arc(cx, cy, radius, 0, Math.PI * 2);
+    ctx.stroke();
+  }
+  // the cartouche: parchment with a dark edge and a gilt line
+  const px0 = W * 0.08, px1 = W * 0.92, py0 = H * 0.7, py1 = H * 0.94;
+  const parchment = ctx.createLinearGradient(0, py0, 0, py1);
+  parchment.addColorStop(0, '#f1e4c4');
+  parchment.addColorStop(1, '#dcc89e');
+  ctx.fillStyle = 'rgba(30,18,8,0.45)';
+  roundRect(ctx, px0 + 6, py0 + 8, px1 - px0, py1 - py0, 18);
+  ctx.fill();
+  ctx.fillStyle = parchment;
+  roundRect(ctx, px0, py0, px1 - px0, py1 - py0, 18);
+  ctx.fill();
+  ctx.strokeStyle = '#8c6d2a';
+  ctx.lineWidth = 3;
+  roundRect(ctx, px0 + 8, py0 + 8, px1 - px0 - 16, py1 - py0 - 16, 12);
+  ctx.stroke();
+  ctx.textAlign = 'center';
+  ctx.textBaseline = 'middle';
+  ctx.fillStyle = '#2e2013';
+  ctx.font = `700 ${Math.round(H * 0.095)}px 'Cormorant Garamond Variable', 'Cormorant Garamond', Garamond, Georgia, serif`;
+  ctx.fillText(title, cx, py0 + (py1 - py0) * 0.32, px1 - px0 - 60);
+  ctx.fillStyle = '#4a3622';
+  ctx.font = `italic 500 ${Math.round(H * 0.052)}px 'Cormorant Garamond Variable', 'Cormorant Garamond', Garamond, Georgia, serif`;
+  const words = tagline.split(' ');
+  const lines: string[] = [];
+  let line = '';
+  for (const word of words) {
+    const test = line ? `${line} ${word}` : word;
+    if (ctx.measureText(test).width > px1 - px0 - 80 && line) {
+      lines.push(line);
+      line = word;
+    } else line = test;
+  }
+  if (line) lines.push(line);
+  lines.slice(0, 2).forEach((l, i) => ctx.fillText(l, cx, py0 + (py1 - py0) * (0.6 + i * 0.22), px1 - px0 - 60));
+  // craquelure: faint cracks over the landscape only, and a gilt inner border
+  ctx.strokeStyle = 'rgba(40,25,10,0.07)';
+  ctx.lineWidth = 1;
+  for (let i = 0; i < 60; i++) {
+    let x = rnd() * W, y = rnd() * py0;
+    ctx.beginPath();
+    ctx.moveTo(x, y);
+    for (let k = 0; k < 6; k++) {
+      x += (rnd() - 0.5) * W * 0.09;
+      y += (rnd() - 0.5) * H * 0.12;
+      ctx.lineTo(x, y);
+    }
+    ctx.stroke();
+  }
+  ctx.strokeStyle = 'rgba(227,192,95,0.55)';
+  ctx.lineWidth = 4;
+  ctx.strokeRect(14, 14, W - 28, H - 28);
+}
+
+function roundRect(ctx: CanvasRenderingContext2D, x: number, y: number, w: number, h: number, r: number): void {
+  ctx.beginPath();
+  ctx.moveTo(x + r, y);
+  ctx.lineTo(x + w - r, y);
+  ctx.quadraticCurveTo(x + w, y, x + w, y + r);
+  ctx.lineTo(x + w, y + h - r);
+  ctx.quadraticCurveTo(x + w, y + h, x + w - r, y + h);
+  ctx.lineTo(x + r, y + h);
+  ctx.quadraticCurveTo(x, y + h, x, y + h - r);
+  ctx.lineTo(x, y + r);
+  ctx.quadraticCurveTo(x, y, x + r, y);
+  ctx.closePath();
 }

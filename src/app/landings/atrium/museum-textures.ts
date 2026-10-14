@@ -71,25 +71,36 @@ export class PanelTexture {
   }
 }
 
+function brassPlate(ctx: CanvasRenderingContext2D, w: number, h: number): void {
+  const brass = ctx.createLinearGradient(0, 0, w, h);
+  brass.addColorStop(0, '#c9a24e');
+  brass.addColorStop(0.5, '#e3c468');
+  brass.addColorStop(1, '#b8892f');
+  ctx.fillStyle = brass;
+  ctx.fillRect(0, 0, w, h);
+  ctx.strokeStyle = '#6b5320';
+  ctx.lineWidth = Math.max(3, h / 40);
+  ctx.strokeRect(10, 10, w - 20, h - 20);
+}
+
 export function drawLabel(panel: PanelTexture, project: ProjectEntry, medium: string): void {
   panel.draw((ctx, w, h) => {
-    ctx.fillStyle = '#f4f2ee';
-    ctx.fillRect(0, 0, w, h);
-    ctx.fillStyle = '#1b1c20';
-    ctx.font = `600 50px ${SERIF}`;
+    brassPlate(ctx, w, h);
+    ctx.fillStyle = '#2e2012';
+    ctx.font = `600 54px ${SERIF}`;
     const titleLines = wrap(ctx, project.title, w - 64).slice(0, 2);
     let y = 74;
     for (const line of titleLines) {
       ctx.fillText(line, 32, y);
       y += 50;
     }
-    ctx.font = `500 26px ${SANS}`;
-    ctx.fillStyle = '#5b5e66';
+    ctx.font = `500 28px ${SERIF}`;
+    ctx.fillStyle = '#3f2e18';
     if (project.year) {
       ctx.fillText(project.year, 32, y + 4);
       y += 38;
     }
-    ctx.font = `500 22px ${SANS}`;
+    ctx.font = `500 24px ${SERIF}`;
     const mediumLines = wrap(ctx, `${medium}: ${project.tech.slice(0, 3).join(', ')}`, w - 64).slice(0, 3);
     y += 8;
     for (const line of mediumLines) {
@@ -124,16 +135,14 @@ export function drawLightbox(panel: PanelTexture, job: ExperienceEntry): void {
 
 export function drawAbout(panel: PanelTexture, portfolio: Portfolio): void {
   panel.draw((ctx, w, h) => {
-    ctx.fillStyle = '#ebe7e0';
-    ctx.fillRect(0, 0, w, h);
-    ctx.fillStyle = '#1c1d21';
-    ctx.font = `500 150px ${SERIF}`;
+    brassPlate(ctx, w, h);
+    ctx.fillStyle = '#2e2012';
+    ctx.font = `600 150px ${SERIF}`;
     ctx.fillText(portfolio.name, 60, 200);
-    ctx.font = `500 46px ${SANS}`;
-    ctx.fillStyle = '#3a3c42';
+    ctx.font = `500 50px ${SERIF}`;
+    ctx.fillStyle = '#3f2e18';
     ctx.fillText(portfolio.role, 66, 290);
-    ctx.font = `500 34px ${SANS}`;
-    ctx.fillStyle = '#6a6c72';
+    ctx.font = `500 38px ${SERIF}`;
     ctx.fillText(portfolio.focus, 66, 350);
     ctx.fillText(portfolio.location, 66, h - 50);
   });
@@ -141,13 +150,12 @@ export function drawAbout(panel: PanelTexture, portfolio: Portfolio): void {
 
 export function drawContact(panel: PanelTexture, title: string, portfolio: Portfolio): void {
   panel.draw((ctx, w, h) => {
-    ctx.fillStyle = '#ebe7e0';
-    ctx.fillRect(0, 0, w, h);
-    ctx.fillStyle = '#1c1d21';
-    ctx.font = `500 130px ${SERIF}`;
+    brassPlate(ctx, w, h);
+    ctx.fillStyle = '#2e2012';
+    ctx.font = `600 130px ${SERIF}`;
     ctx.fillText(title, 56, 170);
-    ctx.font = `500 38px ${SANS}`;
-    ctx.fillStyle = '#4c4e54';
+    ctx.font = `500 42px ${SERIF}`;
+    ctx.fillStyle = '#3f2e18';
     ctx.fillText(portfolio.contact.linkedin.replace('https://www.', ''), 60, 280);
     ctx.fillText(portfolio.contact.github.replace('https://', ''), 60, 340);
     ctx.fillStyle = '#8a6a3a';
@@ -157,11 +165,70 @@ export function drawContact(panel: PanelTexture, title: string, portfolio: Portf
 
 export function drawSign(panel: PanelTexture, text: string): void {
   panel.draw((ctx, w, h) => {
-    ctx.fillStyle = '#16171a';
-    ctx.fillRect(0, 0, w, h);
-    ctx.fillStyle = '#e8d3a8';
-    ctx.font = `500 96px ${SERIF}`;
+    brassPlate(ctx, w, h);
+    ctx.fillStyle = '#2e2012';
+    ctx.font = `600 ${Math.round(h * 0.5)}px ${SERIF}`;
     const width = ctx.measureText(text).width;
-    ctx.fillText(text, (w - width) / 2, h / 2 + 32);
+    ctx.fillText(text, (w - width) / 2, h / 2 + h * 0.17);
+  });
+}
+
+/** The small brass plaque on a cabinet: the role, the company and the years, engraved dark on brass. */
+export function drawPlaque(panel: PanelTexture, job: ExperienceEntry): void {
+  panel.draw((ctx, w, h) => {
+    const brass = ctx.createLinearGradient(0, 0, w, h);
+    brass.addColorStop(0, '#c9a24e');
+    brass.addColorStop(0.5, '#e3c468');
+    brass.addColorStop(1, '#b8892f');
+    ctx.fillStyle = brass;
+    ctx.fillRect(0, 0, w, h);
+    ctx.strokeStyle = '#6b5320';
+    ctx.lineWidth = 6;
+    ctx.strokeRect(12, 12, w - 24, h - 24);
+    ctx.fillStyle = '#3a2a12';
+    ctx.textAlign = 'center';
+    ctx.font = `600 ${Math.round(h * 0.3)}px ${SERIF}`;
+    ctx.fillText(job.role, w / 2, h * 0.46, w - 60);
+    ctx.font = `500 ${Math.round(h * 0.2)}px ${SERIF}`;
+    ctx.fillText(`${job.company}, ${job.period}`, w / 2, h * 0.78, w - 60);
+  });
+}
+
+/** The visitor's face on its monitor: two bright eyes and a wide smile in phosphor green, shut for a blink. */
+export function drawFace(panel: PanelTexture, open: boolean): void {
+  panel.draw((ctx, w, h) => {
+    ctx.fillStyle = '#0f1b17';
+    ctx.fillRect(0, 0, w, h);
+    const glow = ctx.createRadialGradient(w / 2, h / 2, h * 0.1, w / 2, h / 2, h * 0.85);
+    glow.addColorStop(0, 'rgba(93,224,138,0.22)');
+    glow.addColorStop(1, 'rgba(93,224,138,0)');
+    ctx.fillStyle = glow;
+    ctx.fillRect(0, 0, w, h);
+    ctx.fillStyle = '#9af7b0';
+    ctx.strokeStyle = '#9af7b0';
+    ctx.lineCap = 'round';
+    ctx.lineWidth = h * 0.075;
+    for (const x of [w * 0.33, w * 0.67]) {
+      ctx.beginPath();
+      if (open) {
+        ctx.ellipse(x, h * 0.38, w * 0.075, h * 0.13, 0, 0, Math.PI * 2);
+        ctx.fill();
+      } else {
+        ctx.moveTo(x - w * 0.08, h * 0.4);
+        ctx.lineTo(x + w * 0.08, h * 0.4);
+        ctx.stroke();
+      }
+    }
+    ctx.beginPath();
+    ctx.arc(w / 2, h * 0.5, w * 0.26, Math.PI * 0.18, Math.PI * 0.82);
+    ctx.stroke();
+    // a cheek dot either side of the smile, and the scan lines of an old tube
+    for (const x of [w * 0.14, w * 0.86]) {
+      ctx.beginPath();
+      ctx.arc(x, h * 0.62, w * 0.025, 0, Math.PI * 2);
+      ctx.fill();
+    }
+    ctx.fillStyle = 'rgba(0,0,0,0.2)';
+    for (let y = 0; y < h; y += 4) ctx.fillRect(0, y, w, 1);
   });
 }

@@ -18,7 +18,7 @@ export interface MoveInput {
 
 const WALK_SPEED = 2.1;
 const RUN_SPEED = 4.6;
-const RADIUS = 0.34;
+const RADIUS = 0.42;
 const HEIGHT = 1.65;
 
 const lerpAngle = (from: number, to: number, t: number) => {
