@@ -509,18 +509,20 @@ export class AerisScene implements WorldScene {
       this.velocity.addScaledVector(acc, dt);
       pos.addScaledVector(this.velocity, dt);
     }
-    const i = Math.round(k);
-    const side = SIDES[THREE.MathUtils.clamp(i, 0, SIDES.length - 1)];
     const v = this.velocity;
     const a = this.acceleration;
     const ease = 1 - Math.exp(-dt * 7);
     this.bank += (THREE.MathUtils.clamp(-a.x * 0.03 - v.x * 0.16, -0.55, 0.55) - this.bank) * ease;
     this.pitch += (THREE.MathUtils.clamp(a.z * 0.02 + v.z * 0.1, -0.35, 0.35) - this.pitch) * ease;
     this.turn += (THREE.MathUtils.clamp(v.x * 0.45, -0.85, 0.85) - this.turn) * ease * 0.6;
+    // at rest the nose turns towards the middle of the studio; the turn follows where the drone
+    // is, not which stop is nearest, so it never flips in the middle of a crossing
+    const lateral = Math.max(0.3, this.portrait ? 0.5 : this.lateral);
+    const lean = THREE.MathUtils.clamp(pos.x / lateral, -1, 1);
     drone.position.copy(pos);
     if (!reduced) drone.position.y += Math.sin(elapsed * 1.5) * 0.03;
     drone.rotation.set(0, 0, 0);
-    drone.rotation.y = Math.PI + side * 0.5 + this.turn + (reduced ? 0 : Math.sin(elapsed * 0.6) * 0.03);
+    drone.rotation.y = Math.PI - lean * 0.5 + this.turn + (reduced ? 0 : Math.sin(elapsed * 0.6) * 0.03);
     drone.rotateZ(this.bank + (reduced ? 0 : Math.sin(elapsed * 0.9) * 0.02));
     drone.rotateX(this.pitch + (reduced ? 0 : Math.sin(elapsed * 0.7 + 1) * 0.015));
 
