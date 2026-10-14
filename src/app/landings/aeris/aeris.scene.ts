@@ -107,7 +107,7 @@ export class AerisScene implements WorldScene {
     rim.position.set(4, 3, -4);
     this.scene.add(key, rim, new THREE.HemisphereLight('#6f86b0', '#0a0d16', 0.35));
     this.scene.add(this.drone, this.monitor);
-    this.droneLight.position.set(0, -0.35, 0.3);
+    this.droneLight.position.set(0, -0.8, 0.25);
     this.drone.add(this.droneLight);
     const segment = CHAIN_LENGTH / (CHAIN_NODES - 1);
     for (let i = 0; i < CHAIN_NODES; i++) {
@@ -211,12 +211,12 @@ export class AerisScene implements WorldScene {
     const p = positionLocal;
     const map = new Map<string, THREE.Material>();
 
-    const body = new THREE.MeshPhysicalNodeMaterial({ color: '#15171c', roughness: 0.34, clearcoat: 1, clearcoatRoughness: 0.1 });
-    body.roughnessNode = float(0.3).add(mx_noise_float(p.mul(40)).mul(0.06));
+    const body = new THREE.MeshPhysicalNodeMaterial({ color: '#15171c', roughness: 0.42, clearcoat: 0.45, clearcoatRoughness: 0.25 });
+    body.roughnessNode = float(0.38).add(mx_noise_float(p.mul(40)).mul(0.06));
     map.set('body', body);
-    map.set('body_light', new THREE.MeshPhysicalNodeMaterial({ color: '#262a33', roughness: 0.4, clearcoat: 0.7, clearcoatRoughness: 0.2 }));
+    map.set('body_light', new THREE.MeshPhysicalNodeMaterial({ color: '#262a33', roughness: 0.48, clearcoat: 0.35, clearcoatRoughness: 0.3 }));
 
-    const carbon = new THREE.MeshPhysicalNodeMaterial({ roughness: 0.42, clearcoat: 1, clearcoatRoughness: 0.12 });
+    const carbon = new THREE.MeshPhysicalNodeMaterial({ roughness: 0.42, clearcoat: 0.5, clearcoatRoughness: 0.25 });
     const weave = p.xz.mul(55);
     const cell = floor(weave.x.add(weave.y));
     const across = fract(weave.x.sub(weave.y).mul(0.5));
@@ -227,13 +227,13 @@ export class AerisScene implements WorldScene {
     carbon.roughnessNode = mix(float(0.5), float(0.3), sheen);
     map.set('carbon', carbon);
 
-    const metal = new THREE.MeshStandardNodeMaterial({ color: '#6e737c', metalness: 1, roughness: 0.4 });
-    metal.roughnessNode = float(0.36).add(mx_noise_float(p.mul(vec2(160, 7).xyx)).mul(0.06));
+    const metal = new THREE.MeshStandardNodeMaterial({ color: '#6e737c', metalness: 1, roughness: 0.5 });
+    metal.roughnessNode = float(0.46).add(mx_noise_float(p.mul(vec2(160, 7).xyx)).mul(0.06));
     map.set('metal', metal);
     map.set('metal_dark', new THREE.MeshStandardNodeMaterial({ color: '#3a3e46', metalness: 0.9, roughness: 0.42 }));
 
     const glow = new THREE.MeshBasicNodeMaterial();
-    glow.colorNode = color(CYAN).mul(2.4).mul(this.uGlow);
+    glow.colorNode = color(CYAN).mul(1.5).mul(this.uGlow);
     map.set('glow', glow);
 
     // the blades spin faster than the eye follows: faint, with the blur disc standing in for them
@@ -432,7 +432,7 @@ export class AerisScene implements WorldScene {
     const scenePass = pass(this.scene, this.camera);
     const sceneColor = scenePass.getTextureNode();
     // only the light strips and the tube glow; the beige plastic stays below the threshold
-    const glow = bloom(sceneColor, this.ctx.quality === 'low' ? 0.35 : 0.5, 0.4, 0.96);
+    const glow = bloom(sceneColor, this.ctx.quality === 'low' ? 0.25 : 0.34, 0.4, 0.96);
     this.pipeline = new THREE.RenderPipeline(this.ctx.renderer, sceneColor.add(glow));
     this.bag.defer(() => {
       glow.dispose();
@@ -533,7 +533,7 @@ export class AerisScene implements WorldScene {
     if (this.gimbal) this.gimbal.rotation.x = -0.35 + Math.sin(elapsed * 0.5) * 0.05;
     // the light strips breathe a little
     this.uGlow.value = reduced ? 1 : 0.9 + 0.1 * Math.sin(elapsed * 2.1);
-    this.droneLight.intensity = 1.2 * this.uGlow.value;
+    this.droneLight.intensity = 0.6 * this.uGlow.value;
     this.uDroneXZ.value.set(drone.position.x, drone.position.z);
     drone.updateMatrixWorld(true);
   }

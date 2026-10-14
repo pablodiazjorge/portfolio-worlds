@@ -135,17 +135,17 @@ loft(bm, [
     section(0.24, 0.07, 0.03, 0.21),
 ])
 part("canopy", bm, "body_light", root)
-# the glowing spine and the slits along the canopy
+# the glowing spine; the slits along the canopy and the intakes stay dark
 bm = bmesh.new()
 pw.add_box(bm, (0, -0.04, 0.277), (0.028, 0.42, 0.012))
+part("glow_body", bm, "glow", root)
+bm = bmesh.new()
 for sx in (-1, 1):
     for y in (-0.2, -0.1, 0.0, 0.1):
         pw.add_box(bm, (sx * 0.148, y, 0.248), (0.012, 0.05, 0.01))
-# intakes on the hull sides
-for sx in (-1, 1):
     for y in (-0.3, -0.22, -0.14):
         pw.add_box(bm, (sx * 0.192, y, 0.085), (0.012, 0.04, 0.025))
-part("glow_body", bm, "glow", root)
+part("panel_lines", bm, "metal_dark", root)
 # the eye on the nose: a glowing ring round a lens
 bm = bmesh.new()
 ring(bm, (0, 0.553, 0.1), 0.042, 0.007, seg=24, sides=6, plane="XZ")
@@ -188,11 +188,9 @@ for key, (px, py) in PODS.items():
     bmesh.ops.rotate(bm, verts=bm.verts[:], cent=(0, 0, 0), matrix=Matrix.Rotation(angle, 3, "Z"))
     bmesh.ops.translate(bm, verts=bm.verts[:], vec=Vector((sx, sy, 0)))
     part(f"arm_{key}", bm, "carbon", root)
-    # light strips along the top and both sides of the arm
+    # one light strip along the top of the arm
     bm = bmesh.new()
     pw.add_box(bm, (length * 0.52, 0, 0.074), (length * 0.62, 0.03, 0.01))
-    for side in (-1, 1):
-        pw.add_box(bm, (length * 0.55, side * 0.066, 0.02), (length * 0.5, 0.008, 0.028))
     bmesh.ops.rotate(bm, verts=bm.verts[:], cent=(0, 0, 0), matrix=Matrix.Rotation(angle, 3, "Z"))
     bmesh.ops.translate(bm, verts=bm.verts[:], vec=Vector((sx, sy, 0)))
     part(f"glow_arm_{key}", bm, "glow", root)
@@ -223,13 +221,13 @@ for key, (px, py) in PODS.items():
     bmesh.ops.translate(bm, verts=fin, vec=Vector((px, py, 0)))
     bevel_all(bm, 0.01, 1)
     part(f"fin_{key}", bm, "body", root)
-    # a glowing panel on the fin's outer face and a pad at its tip
+    # a dark panel on the fin's outer face and a pad at its tip
     bm = bmesh.new()
     panel = pw.add_box(bm, (0.085, 0, -0.14), (0.012, 0.05, 0.16))
     bmesh.ops.rotate(bm, verts=panel, cent=(0, 0, 0.03), matrix=Matrix.Rotation(math.radians(-11), 3, "Y"))
     bmesh.ops.rotate(bm, verts=panel, cent=(0, 0, 0), matrix=Matrix.Rotation(angle, 3, "Z"))
     bmesh.ops.translate(bm, verts=panel, vec=Vector((px, py, 0)))
-    part(f"glow_fin_{key}", bm, "glow", root)
+    part(f"fin_panel_{key}", bm, "metal_dark", root)
     bm = bmesh.new()
     pad = pw.add_box(bm, (0.0, 0, -0.44), (0.075, 0.06, 0.03))
     bmesh.ops.rotate(bm, verts=pad, cent=(0, 0, 0.03), matrix=Matrix.Rotation(math.radians(-11), 3, "Y"))
