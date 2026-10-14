@@ -1,0 +1,120 @@
+@import 'tailwindcss';
+
+@theme {
+  --font-sans: 'Instrument Sans Variable', ui-sans-serif, system-ui, sans-serif;
+  --font-atlas: 'Fraunces Variable', 'Iowan Old Style', Georgia, serif;
+  --font-aeris: 'Unbounded Variable', 'Arial Black', ui-sans-serif, sans-serif;
+  --font-terra: 'Syne Variable', 'Arial Narrow', ui-sans-serif, sans-serif;
+  --font-helios: 'Michroma', 'Eurostile', ui-sans-serif, sans-serif;
+  --font-atrium: 'Cormorant Garamond Variable', Garamond, Georgia, serif;
+  --ease-out-quart: cubic-bezier(0.25, 1, 0.5, 1);
+  --ease-out-expo: cubic-bezier(0.16, 1, 0.3, 1);
+  --ease-in-out-cubic: cubic-bezier(0.65, 0, 0.35, 1);
+}
+
+:root {
+  --page-bg: #1b1d24;
+  --page-ink: #f2f0ec;
+  --dock-bg: rgb(20 22 30 / 0.55);
+  --dock-ink: #f2f0ec;
+  --dock-line: rgb(255 255 255 / 0.14);
+  --accent: #f0b98d;
+  color-scheme: dark;
+}
+
+html[data-world='atlas'] {
+  --page-bg: #27304f;
+  --accent: #f0b98d;
+}
+
+html[data-world='aeris'] {
+  --page-bg: #d9dce1;
+  --page-ink: #1d2026;
+  --dock-bg: rgb(250 251 252 / 0.62);
+  --dock-ink: #1d2026;
+  --dock-line: rgb(20 24 32 / 0.12);
+  --accent: #ff5a1f;
+  color-scheme: light;
+}
+
+html[data-world='terra'] {
+  --page-bg: #173a6b;
+  --accent: #e3b07a;
+}
+
+html[data-world='helios'] {
+  --page-bg: #03050b;
+  --dock-bg: rgb(6 10 22 / 0.5);
+  --accent: #ffcf8a;
+}
+
+html[data-world='atrium'] {
+  --page-bg: #1f3a33;
+  --accent: #d2ad6c;
+}
+
+html {
+  background: var(--page-bg);
+  transition: background-color 0.6s var(--ease-out-quart);
+  -webkit-text-size-adjust: 100%;
+}
+
+body {
+  margin: 0;
+  min-height: 100dvh;
+  color: var(--page-ink);
+  font-family: var(--font-sans);
+  font-feature-settings: 'kern', 'liga';
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+  text-rendering: optimizeLegibility;
+}
+
+::selection {
+  background: var(--accent);
+  color: #111318;
+}
+
+:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 3px;
+  border-radius: 2px;
+}
+
+a {
+  color: inherit;
+}
+
+/* Lenis smooth scroll */
+html.lenis,
+html.lenis body {
+  height: auto;
+}
+
+.lenis:not(.lenis-autoToggle).lenis-stopped {
+  overflow: clip;
+}
+
+.lenis [data-lenis-prevent] {
+  overscroll-behavior: contain;
+}
+
+.lenis.lenis-smooth iframe {
+  pointer-events: none;
+}
+
+/* Elements revealed by the pwReveal directive start hidden only when JavaScript runs. */
+html.js [data-reveal]:not(.is-revealed) {
+  opacity: 0;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+    scroll-behavior: auto !important;
+  }
+}
