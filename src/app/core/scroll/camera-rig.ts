@@ -266,17 +266,21 @@ export class KeyframeRig {
         reach = dir.length();
         dir.normalize();
       }
-      let required = this.solidAt(ground, point.x, point.z) + ground.clearance - point.y;
-      // only the first part of the view: the far end is the subject, which sits on the ground
-      const span = Math.min(reach * 0.7, 30);
+      const below = this.solidAt(ground, point.x, point.z);
+      let required = below + ground.clearance - point.y;
+      // Only the stretch of the view that would still be above flat ground: looking down, the
+      // ground is meant to appear; a hill that cuts the view short is what needs the lift.
+      const expected = Math.max(0, point.y - below) / Math.max(0.05, -dir.y);
+      const span = Math.min(reach * 0.7, 30, expected * 0.6);
       for (let s = 1.5; s <= span; s += 1.5) {
         this.probe.copy(point).addScaledVector(dir, s);
         required = Math.max(required, ground.at(this.probe.x, this.probe.z) + sight - this.probe.y);
       }
       need[i] = Math.max(0, required);
     }
-    const spread = maxFilter(need, Math.round(SAMPLES * 0.3));
-    return boxBlur(boxBlur(spread, Math.round(SAMPLES * 0.22)), Math.round(SAMPLES * 0.22));
+    // Each obstacle raises a smooth bump that is back to zero within 0.4 of a key, so a ridge
+    // between two stops lifts the move without leaking into the framed stops beside it.
+    return boxBlur(dilate(need, Math.round(SAMPLES * 0.4)), Math.round(SAMPLES * 0.05));
   }
 }
 
@@ -361,12 +365,16 @@ function sampleTable(table: Float32Array | null, k: number): number {
   return MathUtils.lerp(table[i], table[i + 1], x - i);
 }
 
-function maxFilter(values: Float32Array, radius: number): Float32Array {
+/** Smallest smooth envelope over the values: a cosine bump of the given radius under each one. */
+function dilate(values: Float32Array, radius: number): Float32Array {
   const out = new Float32Array(values.length);
-  for (let i = 0; i < values.length; i++) {
-    let best = 0;
-    for (let j = Math.max(0, i - radius); j <= Math.min(values.length - 1, i + radius); j++) best = Math.max(best, values[j]);
-    out[i] = best;
+  for (let j = 0; j < values.length; j++) {
+    const v = values[j];
+    if (v <= 0) continue;
+    for (let i = Math.max(0, j - radius); i <= Math.min(values.length - 1, j + radius); i++) {
+      const c = Math.cos((Math.PI / 2) * (Math.abs(i - j) / radius));
+      out[i] = Math.max(out[i], v * c * c);
+    }
   }
   return out;
 }

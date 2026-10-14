@@ -21,6 +21,7 @@ import {
   vertexColor,
   color,
 } from 'three/tsl';
+import { CSMShadowNode } from 'three/addons/csm/CSMShadowNode.js';
 import { mergeGeometries } from 'three/addons/utils/BufferGeometryUtils.js';
 import { dequantizeMeshes } from '../../core/assets/dequantize';
 import { loadGltf } from '../../core/assets/gltf';
@@ -101,7 +102,14 @@ export class AtlasScene implements WorldScene {
   private solid: HeightField | null = null;
 
   private readonly sun = new THREE.DirectionalLight('#ffffff', 2);
+  private csm: CSMShadowNode | null = null;
+  private lastFov = 0;
   private readonly hemi = new THREE.HemisphereLight('#ffffff', '#444444', 1);
+  /**
+   * A soft, cool light from the side away from the sun, with no shadows. Without it every face
+   * in shade got the same flat sky colour and whole slopes lost their relief.
+   */
+  private readonly fill = new THREE.DirectionalLight('#9fb2ec', 0.5);
   private readonly fog = new THREE.Fog('#a68aa3', 130, 780);
   private fire: THREE.Object3D | null = null;
   private fireLight: THREE.PointLight | null = null;
@@ -122,19 +130,26 @@ export class AtlasScene implements WorldScene {
   constructor(private readonly ctx: EngineContext) {
     this.pointer = ctx.touch || ctx.reducedMotion ? null : new PointerTracker();
     this.scene.fog = this.fog;
-    this.scene.add(this.hemi, this.sun, this.sun.target);
+    this.scene.add(this.hemi, this.sun, this.sun.target, this.fill, this.fill.target);
     this.sun.castShadow = ctx.quality !== 'low';
     const shadowSize = ctx.quality === 'high' ? 2048 : 1024;
     this.sun.shadow.mapSize.set(shadowSize, shadowSize);
-    const cam = this.sun.shadow.camera;
-    cam.left = -38;
-    cam.right = 38;
-    cam.top = 38;
-    cam.bottom = -38;
-    cam.near = 1;
-    cam.far = 260;
-    this.sun.shadow.bias = -0.0006;
-    this.sun.shadow.normalBias = 0.04;
+    this.sun.shadow.camera.near = 1;
+    this.sun.shadow.camera.far = 900;
+    this.sun.shadow.bias = -0.0004;
+    this.sun.shadow.normalBias = 0.05;
+    // Cascades keep crisp shadows next to the camera and still cover the far side of the view,
+    // instead of one box round the focus that dropped shadows near the lens on long views.
+    if (this.sun.castShadow) {
+      this.csm = new CSMShadowNode(this.sun, {
+        cascades: ctx.quality === 'high' ? 3 : 2,
+        maxFar: 320,
+        mode: 'practical',
+        lightMargin: 160,
+      });
+      this.csm.fade = true;
+      this.sun.shadow.shadowNode = this.csm;
+    }
     this.scene.backgroundNode = this.skyNode();
   }
 
@@ -167,6 +182,8 @@ export class AtlasScene implements WorldScene {
         material.flatShading = true;
         return;
       }
+      // The ground and the thin layers on it only receive: with the dawn sun this low, a terrain
+      // that cast would sink the whole valley and every camp into its own shadow.
       const ground = name === 'terrain' || name === 'trail' || name.startsWith('grass') || name.startsWith('flower');
       mesh.castShadow = this.sun.castShadow && !ground;
       mesh.receiveShadow = this.sun.castShadow;
@@ -185,9 +202,8 @@ export class AtlasScene implements WorldScene {
         material.dispose();
       } else if (name === 'trail') {
         mesh.geometry.computeVertexNormals();
-        material.polygonOffset = true;
-        material.polygonOffsetFactor = -2;
-        material.polygonOffsetUnits = -2;
+        mesh.material = this.trailMaterial();
+        material.dispose();
       } else {
         material.flatShading = name !== 'observatory_white';
         if (name.startsWith('fabric') || name === 'marker_red') material.side = THREE.DoubleSide;
@@ -199,7 +215,7 @@ export class AtlasScene implements WorldScene {
     this.scene.add(root);
     root.updateMatrixWorld(true);
     if (found.terrain) {
-      this.ground = new HeightField(found.terrain, 240);
+      this.ground = new HeightField(found.terrain, 360);
       if (built.length) this.solid = new HeightField(built, 240, this.ground);
     }
     this.addSmoke(smoke);
@@ -384,6 +400,23 @@ export class AtlasScene implements WorldScene {
     return this.bag.add(material);
   }
 
+  /**
+   * The trail keeps its vertex colours (worn middle, darker edges, speckled gravel) and gains a
+   * fine grain and scuffs that only show up close, drawn in front of the ground it lies on.
+   */
+  private trailMaterial(): THREE.MeshStandardNodeMaterial {
+    // faceted like the ground it lies on; smooth shading made the narrow strip read as a tube
+    const material = new THREE.MeshStandardNodeMaterial({ roughness: 1, flatShading: true });
+    const p = positionWorld.xz;
+    const grit = mx_noise_float(p.mul(9.0)).mul(0.5).add(0.5);
+    const scuffs = mx_noise_float(p.mul(2.2).add(31.7)).mul(0.5).add(0.5);
+    material.colorNode = vertexColor().mul(float(0.86).add(grit.mul(0.12)).add(smoothstep(0.55, 0.85, scuffs).mul(0.08)));
+    material.polygonOffset = true;
+    material.polygonOffsetFactor = -1;
+    material.polygonOffsetUnits = -1;
+    return this.bag.add(material);
+  }
+
   /** Prayer flags that ripple in the wind; positions are in scene units after dequantizing. */
   private flagMaterial(source: THREE.Color): THREE.MeshStandardNodeMaterial {
     const material = new THREE.MeshStandardNodeMaterial({ color: source, roughness: 0.9, flatShading: true, side: THREE.DoubleSide });
@@ -536,6 +569,8 @@ export class AtlasScene implements WorldScene {
     lerpColor(this.hemi.groundColor, 'hemiGround');
     this.sun.intensity = THREE.MathUtils.lerp(a.sunIntensity, b.sunIntensity, f);
     this.hemi.intensity = THREE.MathUtils.lerp(a.hemiIntensity, b.hemiIntensity, f);
+    // strongest at dawn, when most of the valley is in shade
+    this.fill.intensity = THREE.MathUtils.lerp(0.75, 0.3, THREE.MathUtils.smoothstep(t, 0, 1));
     this.uMist.value = THREE.MathUtils.lerp(a.mist, b.mist, f);
 
     const elevation = THREE.MathUtils.degToRad(THREE.MathUtils.lerp(a.elevation, b.elevation, f));
@@ -553,6 +588,13 @@ export class AtlasScene implements WorldScene {
         Math.cos(lightElevation) * Math.sin(SUN_AZIMUTH),
       )
       .normalize();
+    const fillAzimuth = SUN_AZIMUTH + Math.PI * 0.85;
+    const fillElevation = THREE.MathUtils.degToRad(34);
+    this.fill.position.set(
+      Math.cos(fillElevation) * Math.cos(fillAzimuth) * 100,
+      Math.sin(fillElevation) * 100,
+      Math.cos(fillElevation) * Math.sin(fillAzimuth) * 100,
+    );
   }
 
   update(dt: number, elapsed: number): void {
@@ -566,10 +608,15 @@ export class AtlasScene implements WorldScene {
     const t = rig.position / (rig.count - 1);
     this.applySky(t);
 
-    // keep the shadow frustum around what the camera is looking at
-    this.sun.target.position.copy(rig.focus);
-    this.sun.position.copy(rig.focus).addScaledVector(this.lightDir, 120);
+    // The cascades follow the camera on their own; the light only carries the sun's direction.
+    this.sun.position.copy(this.lightDir).multiplyScalar(200);
+    this.sun.target.position.set(0, 0, 0);
+    this.sun.updateMatrixWorld();
     this.sun.target.updateMatrixWorld();
+    if (this.csm?.camera && this.camera.fov !== this.lastFov) {
+      this.lastFov = this.camera.fov;
+      this.csm.updateFrustums();
+    }
 
     // Quantized meshes keep their dequantization in the node scale, so animate relative to it.
     if (this.fire && this.fireLight) {
@@ -592,15 +639,17 @@ export class AtlasScene implements WorldScene {
   }
 
   resize(width: number, height: number): void {
-    if (this.rig) {
-      this.rig.fitViewport(width, height);
-      return;
+    if (this.rig) this.rig.fitViewport(width, height);
+    else {
+      this.camera.aspect = width / height;
+      this.camera.updateProjectionMatrix();
     }
-    this.camera.aspect = width / height;
-    this.camera.updateProjectionMatrix();
+    // the cascades are cut from the camera frustum, so they follow its shape
+    this.lastFov = 0;
   }
 
   dispose(): void {
+    this.csm?.dispose();
     this.pointer?.dispose();
     this.bag.dispose();
     disposeObject(this.scene);

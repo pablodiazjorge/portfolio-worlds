@@ -26,7 +26,7 @@ noise.seed_set(args.seed)
 rng = random.Random(args.seed)
 
 SIZE = 440.0
-RES = 240
+RES = 360
 WATER = 1.2
 SNOWLINE = 66.0
 TRAIL_HALF = 0.55
@@ -72,6 +72,26 @@ def route_distance(x, y):
     return math.sqrt(float(d2[k])), float(ROUTE_SAMPLES[k, 2])
 
 
+def route_field(x, y):
+    """Distance to the trail, the trail altitude there and the height of the ridge under it.
+
+    Both are averages that favour the nearest stretch of trail. Where two stretches at different
+    heights are about as far away they hand over smoothly; the nearest point alone jumps there
+    and left tall vertical seams. An upper envelope of every stretch avoids the seams but lets
+    a higher stretch bury a lower one, and cutting the trail back down then digs a gorge.
+    """
+    dx = ROUTE_SAMPLES[:, 0] - x
+    dy = ROUTE_SAMPLES[:, 1] - y
+    d = np.sqrt(dx * dx + dy * dy)
+    nearest = float(d.min())
+    w = np.exp(-(d - nearest) / 1.5)
+    alt = float((w * ROUTE_SAMPLES[:, 2]).sum() / w.sum())
+    wc = np.exp(-(d - nearest) / 8.0)
+    cones = ROUTE_SAMPLES[:, 2] - d * 0.42 - d * d * 0.004
+    crest = float((wc * cones).sum() / wc.sum())
+    return nearest, alt, crest
+
+
 def axis_x(y):
     return 16.0 * math.sin(y * 0.011) - 10.0 + 6.0 * math.sin(y * 0.029 + 1.3)
 
@@ -95,19 +115,23 @@ def base_height(x, y):
     lx, ly, lrx, lry = LAKE
     lake = 5.0 * math.exp(-(((x - lx) / lrx) ** 2 + ((y - ly) / lry) ** 2))
     detail = noise.fractal(Vector((x * 0.045, y * 0.045, 3.1)), 0.7, 2.0, 3) * (0.8 + 0.04 * walls)
-    return floor + walls + massif + summit + ends + detail - river - lake
+    # finer relief that the denser grid can actually show, rougher where the ground is high
+    high = floor + walls + massif + summit + ends
+    fine = noise.fractal(Vector((x * 0.13, y * 0.13, 6.2)), 0.6, 2.0, 3) * (0.35 + 0.012 * high)
+    crags = noise.ridged_multi_fractal(Vector((x * 0.07, y * 0.07, 8.4)), 1.0, 2.2, 3, 1.0, 2.0) * pw.smoothstep(45.0, 95.0, high) * 2.6
+    return high + detail + fine + crags - river - lake
 
 
 def height(x, y):
     h = base_height(x, y)
-    d, alt = route_distance(x, y)
-    if d < 60.0:
-        roughness = noise.ridged_multi_fractal(Vector((x * 0.05, y * 0.05, 5.0)), 1.0, 2.0, 3, 1.0, 2.0)
-        crest = alt - d * 0.42 - (d * d) * 0.004 + roughness * pw.smoothstep(4.0, 16.0, d) * (2.0 + alt * 0.05)
-        blend = pw.smoothstep(0.0, 1.0, (crest - h + 6.0) / 12.0)
-        h = max(h, pw.lerp(h, crest, blend))
-        # a corridor several cells wide, so the mesh can actually carry a smooth path
-        h = pw.lerp(alt, h, pw.smoothstep(3.0, 9.0, d))
+    d, alt, crest = route_field(x, y)
+    roughness = noise.ridged_multi_fractal(Vector((x * 0.05, y * 0.05, 5.0)), 1.0, 2.0, 3, 1.0, 2.0)
+    crest += roughness * pw.smoothstep(4.0, 16.0, d) * (2.0 + max(crest, 0.0) * 0.05)
+    # the ridge fades into the natural slopes instead of ending at a fixed distance
+    blend = pw.smoothstep(0.0, 1.0, (crest - h + 6.0) / 12.0) * (1.0 - pw.smoothstep(45.0, 72.0, d))
+    h = max(h, pw.lerp(h, crest, blend))
+    # a corridor several cells wide, so the mesh can actually carry a smooth path
+    h = pw.lerp(alt, h, pw.smoothstep(3.0, 9.0, d))
     for name, sx, sy, alt in ROUTE:
         r = PAD.get(name, 6.5)
         dist = math.hypot(x - sx, y - sy)
@@ -119,15 +143,38 @@ def height(x, y):
 step = SIZE / RES
 heights = [[0.0] * (RES + 1) for _ in range(RES + 1)]
 coords = [[(0.0, 0.0)] * (RES + 1) for _ in range(RES + 1)]
+# The grid jitter draws from its own generator; the shared one skips what the original 240 grid
+# drew, so the trees, rocks and camps placed later keep their layout.
+for _ in range(2 * 239 * 239):
+    rng.random()
+grid_rng = random.Random(f"{args.seed}-grid")
 for j in range(RES + 1):
     for i in range(RES + 1):
         x = -SIZE / 2 + i * step
         y = -SIZE / 2 + j * step
         if 0 < i < RES and 0 < j < RES:
-            x += rng.uniform(-0.3, 0.3) * step
-            y += rng.uniform(-0.3, 0.3) * step
+            x += grid_rng.uniform(-0.3, 0.3) * step
+            y += grid_rng.uniform(-0.3, 0.3) * step
         coords[j][i] = (x, y)
         heights[j][i] = height(x, y)
+
+# Steep rock settles into ledges: on slopes the height is pulled towards steps, which read as
+# strata once shaded. Flat ground, the trail corridor and the camp pads are left alone.
+LEDGE = 2.4
+terraced = [row[:] for row in heights]
+for j in range(1, RES):
+    for i in range(1, RES):
+        h = heights[j][i]
+        gx = (heights[j][i + 1] - heights[j][i - 1]) / (2 * step)
+        gy = (heights[j + 1][i] - heights[j - 1][i]) / (2 * step)
+        steep = pw.smoothstep(0.75, 1.3, math.hypot(gx, gy))
+        if steep <= 0.0:
+            continue
+        q = h / LEDGE
+        f = q - math.floor(q)
+        stepped = (math.floor(q) + pw.smoothstep(0.3, 0.7, f)) * LEDGE
+        terraced[j][i] = pw.lerp(h, stepped, steep * 0.55)
+heights = terraced
 
 C = {k: Vector(pw.hex_color(v)[:3]) for k, v in {
     "meadow_low": "#6f8c50",
@@ -135,9 +182,12 @@ C = {k: Vector(pw.hex_color(v)[:3]) for k, v in {
     "forest": "#476241",
     "rock_light": "#948b9c",
     "rock_dark": "#5e576b",
+    "rock_warm": "#8f7c78",
     "snow": "#e2e6ef",
     "bank": "#a89d84",
     "earth": "#a8875c",
+    "earth_worn": "#bc9d70",
+    "gravel_worn": "#bab3a8",
     "gravel": "#a19a91",
     "packed_snow": "#c9d0dc",
     "pad": "#9a8a68",
@@ -161,6 +211,9 @@ for j in range(RES + 1):
         grass = C["meadow_low"].lerp(C["meadow_high"], pw.smoothstep(12.0, 46.0, h))
         grass = grass.lerp(C["forest"], pw.smoothstep(-0.1, 0.45, patch) * (1.0 - pw.smoothstep(30.0, 48.0, h)))
         rock = C["rock_dark"].lerp(C["rock_light"], 0.5 + 0.5 * noise.noise(Vector((x * 0.08, y * 0.08, 2.0))))
+        # strata: bands that follow the height, wobbling a little so they do not look ruled
+        band = 0.5 + 0.5 * math.sin(h * 1.35 + 3.0 * noise.noise(Vector((x * 0.04, y * 0.04, 5.5))))
+        rock = rock.lerp(C["rock_warm"], band * band * 0.45)
         rock_w = max(pw.smoothstep(0.2, 0.36, slope), pw.smoothstep(52.0, 72.0, h) * 0.85)
         snow_line = SNOWLINE + 5.0 * noise.noise(Vector((x * 0.05, y * 0.05, 4.0)))
         snow_w = pw.smoothstep(snow_line - 4.0, snow_line + 3.0, h) * (1.0 - pw.smoothstep(0.32, 0.5, slope))
@@ -248,6 +301,7 @@ M = {
     "fabric_green": pw.material("fabric_green", "#5d7f3e", 0.85),
     "fabric_blue": pw.material("fabric_blue", "#3d64a8", 0.85),
     "fabric_dark": pw.material("fabric_dark", "#2a2b33", 0.9),
+    "groundsheet": pw.material("groundsheet", "#5f6352", 0.95),
     "rope": pw.material("rope", "#d9cfb8", 0.9),
     "metal": pw.material("metal", "#c9ccd2", 0.45, 0.6),
     "metal_dark": pw.material("metal_dark", "#3a3d44", 0.5, 0.5),
@@ -262,6 +316,10 @@ M = {
     "sign": pw.material("sign_yellow", "#f3c22f", 0.6),
     "marker_red": pw.material("marker_red", "#d23b2f", 0.6),
     "snow": pw.material("snow_block", "#e6eaf1", 0.8),
+    "root": pw.material("root", "#6e5038", 0.95),
+    "bush": pw.material("bush", "#3f6a3c", 0.9),
+    "bush_light": pw.material("bush_light", "#5f8248", 0.9),
+    "snow_print": pw.material("snow_print", "#a9b2c4", 0.9),
     "dark": pw.material("observatory_slit", "#1d2030", 0.6),
     "observatory": pw.material("observatory_white", "#eeeef0", 0.45, 0.05),
     "glow_fire": pw.material("fire_glow", "#ffb24a", 1.0, emission="#ff9a3a", emission_strength=6.0),
@@ -394,7 +452,8 @@ def frame_rot(site):
 def a_frame_tent(origin, rot, color, size=1.0):
     w, l, h = 1.25 * size, 1.9 * size, 1.0 * size
     k = props
-    k.box("fabric_dark", origin, rot, (0, 0, 0.01), (w + 0.35, l + 0.35, 0.02))
+    # a muted groundsheet that only peeks out round the tent; a dark one read as a hole in the ground
+    k.box("groundsheet", origin, rot, (0, 0, 0.01), (w + 0.16, l + 0.2, 0.02))
     over = 0.12 * size
     for side in (-1, 1):
         k.poly(color, origin, rot, [(side * w / 2, -l / 2, 0.02), (side * w / 2, l / 2, 0.02), (0, l / 2 + over, h), (0, -l / 2 - over, h)][::side])
@@ -423,7 +482,7 @@ def a_frame_tent(origin, rot, color, size=1.0):
 
 def dome_tent(origin, rot, color, r=0.85):
     k = props
-    k.box("fabric_dark", origin, rot, (0, 0, 0.01), (2 * r + 0.25, 2 * r + 0.25, 0.02))
+    k.box("groundsheet", origin, rot, (0, 0, 0.01), (2 * r + 0.08, 2 * r + 0.08, 0.02))
     k.dome(color, origin, rot, (0, 0, 0.02), r, squash=0.72, seg=14)
     # crossing poles
     for angle in (math.pi / 4, -math.pi / 4):
@@ -702,7 +761,11 @@ for s in range(int(total / SPACING) + 1):
     t = (target - lengths[cursor]) / span
     samples.append(dense[cursor].lerp(dense[cursor + 1], min(1.0, t)).xy)
 
-ACROSS = (-1.0, -0.5, 0.0, 0.5, 1.0)
+# The cross-section: soft verges that fade into the ground, a slightly raised edge where boots
+# push the soil aside and a worn, sunken middle. The width breathes a little along the way.
+ACROSS = (-1.32, -1.0, -0.62, -0.22, 0.22, 0.62, 1.0, 1.32)
+LIFT = {-1.32: 0.02, -1.0: 0.045, -0.62: 0.032, -0.22: 0.025, 0.22: 0.025, 0.62: 0.032, 1.0: 0.045, 1.32: 0.02}
+trail_rng = random.Random(f"{args.seed}-trail")
 tv, tf, tc = [], [], []
 rows = []
 for k_, p in enumerate(samples):
@@ -711,14 +774,26 @@ for k_, p in enumerate(samples):
     tangent = (nxt - prv).normalized()
     side = Vector((-tangent.y, tangent.x))
     centre_z = surface(p.x, p.y)
-    path = C["earth"].lerp(C["gravel"], pw.smoothstep(40.0, 56.0, centre_z)).lerp(C["packed_snow"], pw.smoothstep(SNOWLINE - 4.0, SNOWLINE + 2.0, centre_z))
+    gravel_w = pw.smoothstep(40.0, 56.0, centre_z)
+    snow_w = pw.smoothstep(SNOWLINE - 4.0, SNOWLINE + 2.0, centre_z)
+    path = C["earth"].lerp(C["gravel"], gravel_w).lerp(C["packed_snow"], snow_w)
+    worn = C["earth_worn"].lerp(C["gravel_worn"], gravel_w).lerp(C["snow"], snow_w)
     wear = 0.85 + 0.15 * noise.noise(Vector((p.x * 0.6, p.y * 0.6, 3.0)))
+    half = TRAIL_HALF * (1.0 + 0.16 * noise.noise(Vector((k_ * SPACING * 0.09, 2.4, 7.7))))
     row = []
     for a in ACROSS:
-        q = p + side * (a * TRAIL_HALF)
-        z = surface(q.x, q.y) + 0.05
-        blend = 1.0 - abs(a) ** 2
-        col = terrain_color(q.x, q.y).lerp(path * wear, blend)
+        q = p + side * (a * half)
+        z = surface(q.x, q.y) + LIFT[a]
+        ground = terrain_color(q.x, q.y)
+        if abs(a) > 1.1:
+            col = ground.lerp(path * wear, 0.28)
+        elif abs(a) > 0.8:
+            col = ground.lerp(path * wear * 0.86, 0.62)
+        else:
+            col = (path * wear).lerp(worn, (1.0 - abs(a) / 0.8) * 0.6)
+            # gravel and small stones speckled through the tread
+            if trail_rng.random() < 0.16:
+                col = col.lerp(C["gravel"] if snow_w < 0.5 else C["snow"], trail_rng.uniform(0.3, 0.7))
         row.append(len(tv))
         tv.append((q.x, q.y, z))
         tc.append((col.x, col.y, col.z, 1.0))
@@ -726,7 +801,8 @@ for k_, p in enumerate(samples):
     if k_ > 0:
         prev = len(tv) - 2 * len(ACROSS)
         for i in range(len(ACROSS) - 1):
-            tf.append((prev + i, prev + i + 1, prev + len(ACROSS) + i + 1, prev + len(ACROSS) + i))
+            # counter-clockwise seen from above, so the faces point up and survive back-face culling
+            tf.append((prev + i, prev + len(ACROSS) + i, prev + len(ACROSS) + i + 1, prev + i + 1))
 trail = pw.mesh_object("trail", tv, tf, M["trail"], smooth=True)
 pw.set_vertex_colors(trail, tc)
 
@@ -761,8 +837,25 @@ pw.add_cone(white_bm, (0, 0, 0.63), 0.056, 0.056, 0.08, segments=6)
 white_src = pw.bm_object("white_src", white_bm, M["white"]).data
 bpy.data.objects.remove(bpy.data.objects["white_src"])
 
+# flat stones set into the tread and footprints pressed into the snow
+flat_src = []
+for k_ in range(2):
+    bm = bmesh.new()
+    pw.add_ico(bm, (0, 0, 0), 1.0, 1, (1.0, 0.8, 0.22))
+    o = pw.bm_object(f"cobble_src_{k_}", bm, M["stone_light" if k_ else "stone"])
+    flat_src.append(o.data)
+    bpy.data.objects.remove(o)
+print_bm = bmesh.new()
+pw.add_cone(print_bm, (0, 0, 0), 0.06, 0.06, 0.01, segments=7)
+bmesh.ops.scale(print_bm, vec=Vector((1.0, 1.8, 1.0)), verts=print_bm.verts[:])
+print_src = pw.bm_object("print_src", print_bm, M["snow_print"]).data
+bpy.data.objects.remove(bpy.data.objects["print_src"])
+
 step_kit = props
 last_marker = -100.0
+last_bar = -100
+last_cairn = -100.0
+ZERO = Vector((0, 0, 0))
 for k_, (p, side, z, tangent) in enumerate(rows):
     if near_site(p.x, p.y):
         continue
@@ -772,10 +865,11 @@ for k_, (p, side, z, tangent) in enumerate(rows):
     if grade > 0.24 and k_ % 3 == 0:
         a = Vector((p.x, p.y, z)) + Vector((side.x, side.y, 0)) * (TRAIL_HALF * 0.95)
         b = Vector((p.x, p.y, z)) - Vector((side.x, side.y, 0)) * (TRAIL_HALF * 0.95)
+        # set proud of the tread, which now sits a few centimetres above the ground
         if z < 56:
-            step_kit.cyl("wood", Vector((0, 0, 0)), 0.0, a + Vector((0, 0, 0.03)), b + Vector((0, 0, 0.03)), 0.06, seg=6)
+            step_kit.cyl("wood", Vector((0, 0, 0)), 0.0, a + Vector((0, 0, 0.07)), b + Vector((0, 0, 0.07)), 0.06, seg=6)
         else:
-            centre = Vector((p.x, p.y, z + 0.02))
+            centre = Vector((p.x, p.y, z + 0.06))
             step_kit.box("stone_light", centre, math.atan2(side.y, side.x), (0, 0, 0), (TRAIL_HALF * 1.9, 0.26, 0.09))
     if k_ % 4 == 0:
         s = 1 if (k_ // 4) % 2 else -1
@@ -785,6 +879,50 @@ for k_, (p, side, z, tangent) in enumerate(rows):
         obj.scale = (size, size * rng.uniform(0.7, 1.1), size * rng.uniform(0.5, 0.9))
         obj.rotation_euler = (0, 0, rng.uniform(0, math.tau))
         obj.location = (q.x, q.y, surface(q.x, q.y) - size * 0.15)
+        edge_col.objects.link(obj)
+    # cobbles bedded in the tread
+    if z < SNOWLINE - 2 and trail_rng.random() < 0.2:
+        q = p + side * (trail_rng.uniform(-0.7, 0.7) * TRAIL_HALF)
+        obj = bpy.data.objects.new(f"cobble_{k_}", flat_src[k_ % 2])
+        size = trail_rng.uniform(0.09, 0.2)
+        obj.scale = (size, size * trail_rng.uniform(0.7, 1.1), size)
+        obj.rotation_euler = (0, 0, trail_rng.uniform(0, math.tau))
+        obj.location = (q.x, q.y, surface(q.x, q.y) + 0.05)
+        edge_col.objects.link(obj)
+    # a diagonal log every so often on moderate climbs, to shed rain off the path
+    if 0.12 < grade <= 0.24 and z < 56 and k_ - last_bar > 38:
+        last_bar = k_
+        skew = side * math.cos(0.5) + tangent * math.sin(0.5)
+        a3 = p + skew * (TRAIL_HALF * 1.25)
+        b3 = p - skew * (TRAIL_HALF * 1.25)
+        step_kit.cyl("wood", ZERO, 0.0, Vector((a3.x, a3.y, surface(a3.x, a3.y) + 0.07)), Vector((b3.x, b3.y, surface(b3.x, b3.y) + 0.07)), 0.055, seg=6)
+    # roots crossing the path through the forest
+    if z < 40 and trail_rng.random() < 0.035:
+        turn = trail_rng.uniform(-0.6, 0.6)
+        across = side * math.cos(turn) + tangent * math.sin(turn)
+        s0 = p + across * (TRAIL_HALF * 1.7)
+        s1 = p - across * (TRAIL_HALF * 1.4)
+        mid = (s0 + s1) / 2 + tangent * trail_rng.uniform(-0.1, 0.1)
+        pts = [Vector((v.x, v.y, surface(v.x, v.y) + lift)) for v, lift in ((s0, 0.02), (mid, 0.1), (s1, 0.03))]
+        step_kit.cyl("root", ZERO, 0.0, pts[0], pts[1], 0.06, 0.04, seg=5)
+        step_kit.cyl("root", ZERO, 0.0, pts[1], pts[2], 0.04, 0.02, seg=5)
+    # cairns above the tree line, where posts give way to stacked stones
+    if z > 50 and distance_along - last_cairn > 18.0:
+        last_cairn = distance_along
+        sign = -1 if (k_ // 7) % 2 else 1
+        q = p + side * sign * (TRAIL_HALF + 0.9)
+        zc = surface(q.x, q.y) - 0.02
+        for level, r_ in enumerate((0.26, 0.21, 0.17, 0.12, 0.08)):
+            lift = r_ * 0.5
+            step_kit.ico("stone_light" if level % 2 else "stone", Vector((q.x, q.y, 0)), trail_rng.uniform(0, math.tau), (0, 0, zc + lift), r_, scale=(1.0, 0.85, 0.5))
+            zc += lift * 1.6
+    # footprints up the snow, left and right
+    if z > SNOWLINE - 3:
+        foot = 1 if k_ % 2 else -1
+        q = p + side * (foot * 0.11 + trail_rng.uniform(-0.03, 0.03)) + tangent * trail_rng.uniform(-0.04, 0.04)
+        obj = bpy.data.objects.new(f"print_{k_}", print_src)
+        obj.rotation_euler = (0, 0, math.atan2(tangent.y, tangent.x) - math.pi / 2 + trail_rng.uniform(-0.2, 0.2))
+        obj.location = (q.x, q.y, surface(q.x, q.y) + 0.06)
         edge_col.objects.link(obj)
     if distance_along - last_marker > 22.0 and z < SNOWLINE + 6:
         last_marker = distance_along
@@ -822,21 +960,29 @@ trunk = pw.material("pine_trunk", "#5b4232", roughness=1.0)
 
 
 def pine_mesh(name, tiers, mat):
+    """More, slimmer tiers with nine sides each, and a slight irregularity so no two rims match."""
+    bark = random.Random(f"{args.seed}-{name}")
     bm = bmesh.new()
-    trunk_verts = pw.add_cone(bm, (0, 0, 0), 0.09, 0.07, 0.5, segments=5)
+    trunk_verts = pw.add_cone(bm, (0, 0, 0), 0.09, 0.07, 0.5, segments=6)
     pw.assign_material_index(bm, trunk_verts, 1)
     z = 0.35
+    scale = 4.0 / (tiers - 1)
     for k in range(tiers):
-        radius = 0.62 - k * (0.42 / tiers)
-        height_ = 0.9 - k * 0.12
-        pw.add_cone(bm, (0, 0, z), radius, 0.02, height_, segments=7, rotation=k * 0.6)
-        z += height_ * 0.52
+        radius = 0.64 - k * (0.46 / tiers)
+        height_ = (0.9 - k * 0.12 * scale) * scale * 0.8
+        vs = pw.add_cone(bm, (0, 0, z), radius, 0.02, height_, segments=9, rotation=k * 0.6)
+        for v in vs:
+            if v.co.z < z + height_ * 0.2:
+                v.co.x *= bark.uniform(0.9, 1.08)
+                v.co.y *= bark.uniform(0.9, 1.08)
+                v.co.z -= bark.uniform(0.0, 0.07)
+        z += height_ * 0.5
     obj = pw.bm_object(name, bm, [mat, trunk])
     return obj.data
 
 
-pine_tall = pine_mesh("pine_tall", 4, foliage)
-pine_round = pine_mesh("pine_round", 3, foliage_light)
+pine_tall = pine_mesh("pine_tall", 5, foliage)
+pine_round = pine_mesh("pine_round", 4, foliage_light)
 
 trees_col = pw.collection("trees")
 placed = 0
@@ -869,17 +1015,39 @@ print(f"[pw] trees placed: {placed}")
 
 # --- boulders ----------------------------------------------------------------------------------------
 rocks_col = pw.collection("rocks")
+# Boulders get their own, finer meshes: twice subdivided and dented, so they hold up close.
+boulder_rng = random.Random(f"{args.seed}-boulders")
+boulder_src = []
+for k_ in range(3):
+    bm = bmesh.new()
+    pw.add_ico(bm, (0, 0, 0), 0.5, 2, (1.2, 0.95, 0.68))
+    for v in bm.verts:
+        dent = noise.noise(v.co * 3.1 + Vector((k_ * 7.3, 1.7, 4.2)))
+        v.co *= 1.0 + 0.16 * dent + boulder_rng.uniform(-0.03, 0.03)
+    o = pw.bm_object(f"boulder_src_{k_}", bm, M["stone_light" if k_ == 1 else "stone"])
+    boulder_src.append(o.data)
+    bpy.data.objects.remove(o)
 for k in range(220):
     x = rng.uniform(-170.0, 170.0)
     y = rng.uniform(-170.0, 170.0)
     h = surface(x, y)
     if h < WATER + 0.6 or h > 95.0 or route_distance(x, y)[0] < 2.0 or near_site(x, y):
         continue
-    obj = bpy.data.objects.new(f"rock_{k}", rock_src[k % 3])
+    # nothing rests on a near-vertical face; a boulder there sinks out of sight and leaves only its shadow
+    if surface_normal(x, y).z < 0.74:
+        continue
+    obj = bpy.data.objects.new(f"rock_{k}", boulder_src[k % 3])
     s = rng.uniform(1.0, 4.0)
     obj.scale = (s, s * rng.uniform(0.75, 1.2), s * rng.uniform(0.8, 1.25))
     obj.rotation_euler = (0.0, 0.0, rng.uniform(0, math.tau))
-    obj.location = (x, y, h - 0.06 * s)
+    # settle on the lowest ground under the footprint, so no side floats and casts a loose shadow
+    reach = 0.42 * s
+    rim = [surface(x + math.cos(a) * reach, y + math.sin(a) * reach) for a in (0.0, 1.05, 2.1, 3.14, 4.19, 5.24)]
+    if max(rim) - min(rim) > 0.55 * s:
+        continue  # too much drop under it for its size
+    low = min([h] + rim)
+    # but never so deep on a steep face that the rock disappears into it
+    obj.location = (x, y, max(low, h - 0.15 * s) - 0.05 * s)
     rocks_col.objects.link(obj)
 
 # --- grass tufts and flowers along the trail and around the camps ---------------------------------------------
@@ -975,6 +1143,84 @@ for name in ("camp_3", "camp_4", "camp_5", "ridge"):
         obj.rotation_euler = (0, 0, rng.uniform(0, math.tau))
         obj.location = (x, y, surface(x, y) - s * 0.1)
         detail_col.objects.link(obj)
+
+# --- the meadows and slopes away from the trail ------------------------------------------------------------------
+# Patches of grass, bushes, loose stones and the odd fallen trunk, so the open ground between the
+# camps reads as close as the camps do. Everything here is instanced, and draws from its own
+# generator so the camps placed afterwards keep their layout.
+scatter = random.Random(f"{args.seed}-meadows")
+bush_meshes = []
+for k_, mat in enumerate(("bush", "bush_light")):
+    bm = bmesh.new()
+    for c in range(3):
+        a = c / 3 * math.tau + k_
+        pw.add_ico(bm, (math.cos(a) * 0.32, math.sin(a) * 0.32, 0.28 + 0.08 * c), 0.42 - 0.06 * c, 1, (1.0, 1.0, 0.78))
+    for v in bm.verts:
+        v.co *= 1.0 + 0.1 * noise.noise(v.co * 4.0 + Vector((k_ * 3.3, 0.7, 1.9)))
+    o = pw.bm_object(f"{mat}_src", bm, M[mat])
+    bush_meshes.append(o.data)
+    bpy.data.objects.remove(o)
+
+placed_tufts = placed_bushes = placed_stones = 0
+attempts = 0
+while (placed_tufts < 5200 or placed_bushes < 380 or placed_stones < 1400) and attempts < 140000:
+    attempts += 1
+    x = scatter.uniform(-190.0, 190.0)
+    y = scatter.uniform(-190.0, 180.0)
+    h = surface(x, y)
+    if h < WATER + 1.0 or h > 100.0:
+        continue
+    up = surface_normal(x, y).z
+    if route_distance(x, y)[0] < TRAIL_HALF + 0.4 or near_site(x, y, 1.0):
+        continue
+    patch = noise.noise(Vector((x * 0.06, y * 0.06, 12.3)))
+    if placed_stones < 1400 and h > 24.0 and up > 0.62 and scatter.random() < 0.3:
+        obj = bpy.data.objects.new(f"stone_{placed_stones}", rock_src[placed_stones % 3])
+        size = scatter.uniform(0.12, 0.42) * (1.8 if scatter.random() < 0.1 else 1.0)
+        obj.scale = (size, size * scatter.uniform(0.7, 1.2), size * scatter.uniform(0.5, 0.85))
+        obj.rotation_euler = (0, 0, scatter.uniform(0, math.tau))
+        obj.location = (x, y, h - size * 0.12)
+        placed_stones += 1
+    elif placed_bushes < 380 and h < 46.0 and up > 0.84 and patch > 0.05 and scatter.random() < 0.08:
+        obj = bpy.data.objects.new(f"bush_{placed_bushes}", bush_meshes[placed_bushes % 2])
+        size = scatter.uniform(0.7, 1.5)
+        obj.scale = (size, size * scatter.uniform(0.85, 1.15), size * scatter.uniform(0.8, 1.1))
+        obj.rotation_euler = (0, 0, scatter.uniform(0, math.tau))
+        obj.location = (x, y, h - 0.08 * size)
+        placed_bushes += 1
+    elif placed_tufts < 5200 and h < 60.0 and up > 0.8 and patch > -0.15:
+        dry = h > 32.0 or scatter.random() < 0.25
+        obj = bpy.data.objects.new(f"meadow_tuft_{placed_tufts}", tufts[1 if dry else 0])
+        size = scatter.uniform(0.8, 1.6)
+        obj.scale = (size, size, size * scatter.uniform(0.85, 1.2))
+        obj.rotation_euler = (0, 0, scatter.uniform(0, math.tau))
+        obj.location = (x, y, h - 0.02)
+        placed_tufts += 1
+    else:
+        continue
+    detail_col.objects.link(obj)
+print(f"[pw] meadows: tufts {placed_tufts}, bushes {placed_bushes}, stones {placed_stones}")
+
+# fallen trunks in the woods, bark side up, with a pale cut at each end
+for k_ in range(40):
+    x = scatter.uniform(-120.0, 140.0)
+    y = scatter.uniform(-150.0, 60.0)
+    h = surface(x, y)
+    if h < WATER + 2.0 or h > 44.0 or surface_normal(x, y).z < 0.88:
+        continue
+    if route_distance(x, y)[0] < 2.5 or near_site(x, y, 2.0):
+        continue
+    length = scatter.uniform(2.2, 4.2)
+    turn = scatter.uniform(0, math.tau)
+    d = Vector((math.cos(turn), math.sin(turn), 0)) * (length / 2)
+    a = Vector((x, y, 0)) - d
+    b = Vector((x, y, 0)) + d
+    r = scatter.uniform(0.12, 0.2)
+    a.z = surface(a.x, a.y) + r * 0.8
+    b.z = surface(b.x, b.y) + r * 0.8
+    props.cyl("wood_dark", ZERO, 0.0, a, b, r, r * 0.85, seg=7)
+    for end, inward in ((a, (b - a).normalized()), (b, (a - b).normalized())):
+        props.cyl("wood_light", ZERO, 0.0, end - inward * 0.01, end + inward * 0.012, r * 0.9, r * 0.9, seg=7)
 
 for name in ("pine_tall", "pine_round"):
     bpy.data.objects.remove(bpy.data.objects[name])

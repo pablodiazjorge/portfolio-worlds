@@ -30,7 +30,7 @@ const ASSETS = [
     name: 'atlas-valley',
     script: 'atlas_valley.py',
     out: 'public/models/atlas/valley.glb',
-    budgetKB: 1600,
+    budgetKB: 2600,
     stripNormals: ['terrain', 'horizon', 'trail'],
   },
   {
