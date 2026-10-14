@@ -1,5 +1,5 @@
 import * as THREE from 'three/webgpu';
-import { abs, color, float, fract, max, mix, mx_noise_float, positionLocal, positionWorld, smoothstep, step, texture, time, uv, vec2 } from 'three/tsl';
+import { abs, color, float, fract, max, min, mix, mx_noise_float, positionLocal, positionWorld, reflector, smoothstep, texture, time, uv, vec2, vertexColor } from 'three/tsl';
 import { RoomEnvironment } from 'three/addons/environments/RoomEnvironment.js';
 import { dequantizeMeshes } from '../../core/assets/dequantize';
 import { loadGltf } from '../../core/assets/gltf';
@@ -22,30 +22,49 @@ interface Obstacle extends FloorBox {
   maxY: number;
 }
 
-type Room = 'lobby' | 'hall' | 'wing';
+type Room = 'hall' | 'second';
 
-/** Waypoints so routes go through doors instead of into walls. */
+/** Waypoints so routes between the two rooms go down the aisles and through the arch. */
 const NODES: Record<string, { x: number; z: number; rooms: Room[] }> = {
-  L: { x: 0, z: 27, rooms: ['lobby'] },
-  D1: { x: 0, z: 19.6, rooms: ['lobby', 'hall'] },
-  W1: { x: -4.5, z: 15, rooms: ['hall'] },
-  E1: { x: 4.5, z: 15, rooms: ['hall'] },
-  W2: { x: -4.5, z: 4, rooms: ['hall'] },
-  E2: { x: 4.5, z: 4, rooms: ['hall'] },
-  E3: { x: 4.5, z: -1, rooms: ['hall'] },
-  W3: { x: -4.5, z: -9, rooms: ['hall'] },
-  E4: { x: 4.5, z: -9, rooms: ['hall'] },
-  W4: { x: -4.5, z: -21, rooms: ['hall'] },
-  E5: { x: 4.5, z: -21, rooms: ['hall'] },
-  D2: { x: 8.6, z: -1, rooms: ['hall', 'wing'] },
-  WC: { x: 14, z: -3, rooms: ['wing'] },
+  S: { x: 0, z: 10, rooms: ['hall'] },
+  W1: { x: -4.6, z: 6.5, rooms: ['hall'] },
+  E1: { x: 4.6, z: 6.5, rooms: ['hall'] },
+  W2: { x: -4.6, z: -5, rooms: ['hall'] },
+  E2: { x: 4.6, z: -5, rooms: ['hall'] },
+  A: { x: 0, z: -12.5, rooms: ['hall', 'second'] },
+  N: { x: 0, z: -22, rooms: ['second'] },
 };
 const EDGES: [string, string][] = [
-  ['L', 'D1'], ['D1', 'W1'], ['D1', 'E1'], ['W1', 'E1'], ['W1', 'W2'], ['E1', 'E2'], ['W2', 'E2'], ['E2', 'E3'],
-  ['E3', 'E4'], ['W2', 'W3'], ['W3', 'W4'], ['E4', 'E5'], ['W4', 'E5'], ['E3', 'D2'], ['D2', 'WC'],
+  ['S', 'W1'], ['S', 'E1'], ['W1', 'W2'], ['E1', 'E2'], ['W2', 'A'], ['E2', 'A'], ['A', 'N'],
 ];
 
-const roomAt = (x: number, z: number): Room => (z > 20 ? 'lobby' : x > 7.2 ? 'wing' : 'hall');
+const roomAt = (_x: number, z: number): Room => (z > -14 ? 'hall' : 'second');
+
+/** The roped pedestal in the middle of the nave, which a straight walk must go round. */
+const PEDESTAL = { minX: -3.6, maxX: 3.6, minZ: -4.5, maxZ: 2.7 };
+
+function crossesPedestal(from: THREE.Vector3, to: THREE.Vector3): boolean {
+  // a 2D segment against the box, by clipping the parameter range on each axis
+  let t0 = 0;
+  let t1 = 1;
+  for (const [a, b, lo, hi] of [
+    [from.x, to.x, PEDESTAL.minX, PEDESTAL.maxX],
+    [from.z, to.z, PEDESTAL.minZ, PEDESTAL.maxZ],
+  ]) {
+    const d = b - a;
+    if (Math.abs(d) < 1e-6) {
+      if (a < lo || a > hi) return false;
+      continue;
+    }
+    let near = (lo - a) / d;
+    let far = (hi - a) / d;
+    if (near > far) [near, far] = [far, near];
+    t0 = Math.max(t0, near);
+    t1 = Math.min(t1, far);
+    if (t0 > t1) return false;
+  }
+  return true;
+}
 
 export class AtriumScene implements WorldScene {
   readonly scene = new THREE.Scene();
@@ -69,7 +88,8 @@ export class AtriumScene implements WorldScene {
   private elapsed = 0;
   private active: Exhibit | null = null;
   private lastWave = -10;
-  private readonly sun = new THREE.DirectionalLight('#fff4e4', 2.2);
+  private readonly sun = new THREE.DirectionalLight('#ffe9c4', 3.4);
+  private readonly sunOffset = new THREE.Vector3(-9, 14, 4);
   private readonly raycaster = new THREE.Raycaster();
   private readonly floor = new THREE.Plane(new THREE.Vector3(0, 1, 0), 0);
   private readonly pivot = new THREE.Vector3();
@@ -87,19 +107,20 @@ export class AtriumScene implements WorldScene {
     copy: MuseumCopy,
   ) {
     this.copy = copy;
-    this.scene.background = new THREE.Color('#141615');
-    this.scene.add(new THREE.HemisphereLight('#fff3e2', '#2c3230', 0.9));
-    this.sun.position.set(4, 14, 3);
+    this.scene.background = new THREE.Color('#1a1712');
+    // a bright hall: warm bounce from the marble, cooler light from high up, sun from the west
+    this.scene.add(new THREE.HemisphereLight('#fff4e2', '#7d7160', 0.85));
+    this.sun.position.set(-9, 14, 4);
     this.sun.castShadow = ctx.quality !== 'low';
-    this.sun.shadow.mapSize.set(1024, 1024);
+    this.sun.shadow.mapSize.set(2048, 2048);
     const cam = this.sun.shadow.camera;
-    cam.left = -10;
-    cam.right = 10;
-    cam.top = 10;
-    cam.bottom = -10;
+    cam.left = -14;
+    cam.right = 14;
+    cam.top = 14;
+    cam.bottom = -14;
     cam.near = 1;
-    cam.far = 40;
-    this.sun.shadow.bias = -0.0008;
+    cam.far = 50;
+    this.sun.shadow.bias = -0.0006;
     this.sun.shadow.radius = 4;
     this.scene.add(this.sun, this.sun.target);
   }
@@ -133,7 +154,9 @@ export class AtriumScene implements WorldScene {
     this.collectObstacles(root);
     this.collectExhibits(root);
     this.addPictureLights(root);
-    this.addSkyBeams(root);
+    this.addWindowLight(root);
+    this.addColourPools(root);
+    this.addCandles(root);
     this.scene.add(root);
     this.redraw();
 
@@ -168,35 +191,70 @@ export class AtriumScene implements WorldScene {
       lib.set(name, m);
       return m;
     };
-    std('wall_light', { color: '#ebe7e0', roughness: 0.92 });
-    std('wall_green', { color: '#25423a', roughness: 0.9 });
-    std('wall_dark', { color: '#232529', roughness: 0.9 });
-    std('ceiling', { color: '#efede8', roughness: 0.95 });
-    std('frame', { color: '#b48a4a', roughness: 0.32, metalness: 1 });
-    std('frame_dark', { color: '#17181b', roughness: 0.4 });
-    std('brass', { color: '#c59a52', roughness: 0.28, metalness: 1 });
-    std('bench', { color: '#3a2a1f', roughness: 0.55 });
-    std('leather', { color: '#1d1e22', roughness: 0.55 });
-    std('marble', { color: '#ebe8e3', roughness: 0.22 });
-    std('desk', { color: '#efece7', roughness: 0.45 });
-    std('trim', { color: '#191a1d', roughness: 0.5 });
-
-    const stone = std('floor_stone', { roughness: 0.2 });
     const p = positionWorld.xz;
-    const tile = p.div(1.2);
-    const seam = max(step(0.985, fract(tile.x)), step(0.985, fract(tile.y)));
-    const veins = mx_noise_float(p.mul(0.45)).mul(0.5).add(0.5);
-    stone.colorNode = mix(mix(color('#d2cfc8'), color('#c3bfb6'), veins), color('#9b978f'), seam);
-    stone.roughnessNode = mix(float(0.16), float(0.5), seam);
+    const grain = mx_noise_float(positionWorld.mul(1.3)).mul(0.5).add(0.5);
 
-    const oak = std('floor_oak', { roughness: 0.45 });
-    const plank = fract(p.y.div(0.22));
-    const grain = mx_noise_float(p.mul(vec2(0.6, 9))).mul(0.5).add(0.5);
-    oak.colorNode = mix(mix(color('#5c3e2a'), color('#7a5539'), grain), color('#2e2016'), step(0.97, plank));
+    // cream stone with a little dirt in the grain; the mouldings a shade darker
+    const stone = std('stone', { roughness: 0.85 });
+    stone.colorNode = mix(color('#e9e0cf'), color('#d6c9b2'), grain.mul(0.6));
+    const stoneDark = std('stone_dark', { roughness: 0.85 });
+    stoneDark.colorNode = mix(color('#d3c5ae'), color('#bfae94'), grain.mul(0.6));
+    const vault = std('vault', { roughness: 0.9 });
+    // the webs darken towards the crown, where the candlelight does not reach
+    vault.colorNode = mix(color('#e9e0d0'), color('#b5a68f'), smoothstep(10, 16.6, positionWorld.y));
+    std('rib', { color: '#9c8a6a', roughness: 0.85 });
+    std('panel_blue', { color: '#233459', roughness: 0.8 });
+    std('gold', { color: '#d8b05a', roughness: 0.28, metalness: 1 });
+    std('brass', { color: '#b08a45', roughness: 0.34, metalness: 1 });
+    std('crimson', { color: '#8e1f30', roughness: 0.85 });
+    std('wood', { color: '#3b2719', roughness: 0.55 });
+    std('velvet', { color: '#a1202f', roughness: 0.95 });
+    const marble = std('marble', { roughness: 0.28 });
+    marble.colorNode = mix(color('#f3efe8'), color('#d9d2c6'), smoothstep(0.55, 0.9, mx_noise_float(positionWorld.mul(2.2))).mul(0.5));
+    std('statue', { color: '#a6a39d', roughness: 0.72 });
+    std('plinth', { color: '#383a40', roughness: 0.75 });
+    std('lead', { color: '#141418', roughness: 0.9 });
+    std('candle', { color: '#f2e6cc', roughness: 0.6 });
+    std('iron', { color: '#2a2b30', roughness: 0.5, metalness: 0.8 });
+    std('paper', { color: '#f1e8d2', roughness: 0.85 });
+    std('screen', { color: '#28303a', roughness: 0.3 });
+    std('label', { color: '#f4f2ee', roughness: 0.7 });
+    std('canvas', { color: '#222222', roughness: 0.8 });
 
-    const sky = new THREE.MeshBasicNodeMaterial();
-    sky.colorNode = color('#fff6e8').mul(1.8);
-    lib.set('skylight', sky);
+    // the windows: coloured panes lit from outside
+    const glass = new THREE.MeshBasicNodeMaterial({ side: THREE.DoubleSide });
+    glass.colorNode = vertexColor().rgb.pow(1.2).mul(2.0).add(0.03);
+    lib.set('glass', glass);
+    const flame = new THREE.MeshBasicNodeMaterial();
+    flame.colorNode = color('#ffc46a').mul(2.2);
+    lib.set('flame', flame);
+    const caseGlass = new THREE.MeshPhysicalNodeMaterial({ color: '#dfe8f0', roughness: 0.05, transparent: true, opacity: 0.16, depthWrite: false, side: THREE.DoubleSide });
+    lib.set('case_glass', caseGlass);
+
+    // polished marble with the inlay: red bands on a diamond grid and a border along the walls
+    const floor = std('floor', { roughness: 0.14 });
+    const veins = smoothstep(0.48, 0.92, mx_noise_float(positionWorld.mul(vec2(0.9, 0.35).xyx)).mul(0.5).add(0.5));
+    const base = mix(color('#e8e1d3'), color('#cfc4b1'), veins.mul(0.55));
+    const turned = vec2(p.x.add(p.y), p.x.sub(p.y)).div(5.5);
+    const toLine = abs(fract(turned).sub(0.5));
+    const diamond = float(1).sub(smoothstep(0.012, 0.03, min(toLine.x, toLine.y)));
+    const grey = float(1).sub(smoothstep(0.008, 0.02, abs(min(toLine.x, toLine.y).sub(0.055))));
+    const border = float(1).sub(smoothstep(0.1, 0.2, abs(abs(p.x).sub(5.1))));
+    const joints = max(float(1).sub(smoothstep(0.004, 0.012, abs(fract(p.x.div(1.1)).sub(0.5)).negate().add(0.5))), float(1).sub(smoothstep(0.004, 0.012, abs(fract(p.y.div(1.1)).sub(0.5)).negate().add(0.5))));
+    const inlay = max(diamond, border);
+    const stoneFloor = mix(mix(mix(base, color('#b9b2a4'), joints.mul(0.5)), color('#8c8577'), grey.mul(0.7)), color('#7a1f26'), inlay.mul(0.9));
+    floor.roughnessNode = mix(float(0.12), float(0.3), inlay);
+    if (this.ctx.quality === 'low') {
+      floor.colorNode = stoneFloor;
+    } else {
+      // the polish: the hall mirrored in the marble, dimmer on the inlay
+      const mirror = reflector({ resolutionScale: this.ctx.quality === 'high' ? 0.5 : 0.35 });
+      mirror.target.rotateX(-Math.PI / 2);
+      mirror.target.position.y = 0.002;
+      this.scene.add(mirror.target);
+      this.bag.defer(() => mirror.dispose());
+      floor.colorNode = mix(stoneFloor, mirror.rgb.mul(0.9), mix(float(0.3), float(0.14), inlay));
+    }
 
     const loader = new THREE.TextureLoader();
     root.traverse((o) => {
@@ -247,8 +305,8 @@ export class AtriumScene implements WorldScene {
         source.dispose();
         mesh.material = material;
       }
-      mesh.receiveShadow = true;
-      mesh.castShadow = source.name === 'bench' || source.name === 'marble' || source.name === 'desk';
+      mesh.receiveShadow = source.name !== 'glass' && source.name !== 'flame';
+      mesh.castShadow = /^(marble|statue|plinth|wood|stone|stone_dark)$/.test(source.name);
     });
     lib.forEach((m) => this.bag.add(m));
   }
@@ -286,7 +344,7 @@ export class AtriumScene implements WorldScene {
     const fromTop = float(1).sub(local.y);
     const spread = abs(local.x.sub(0.5)).mul(2);
     const cone = smoothstep(fromTop.mul(0.75).add(0.25), fromTop.mul(0.3), spread).mul(smoothstep(1.0, 0.1, fromTop));
-    material.colorNode = color('#ffd9a3').mul(cone.mul(0.32));
+    material.colorNode = color('#ffd9a3').mul(cone.mul(0.42));
     this.bag.add(material);
     for (let i = 0; i < 13; i++) {
       const light = root.getObjectByName(`light_${i}`);
@@ -304,24 +362,57 @@ export class AtriumScene implements WorldScene {
     }
   }
 
-  /** Soft shafts of light under the skylights, with a little dust drifting through. */
-  private addSkyBeams(root: THREE.Object3D): void {
-    const geometry = this.bag.add(new THREE.BoxGeometry(5.4, 6, 3.6));
-    geometry.translate(0, 3, 0);
+  /** Shafts of sunlight slanting in from the west windows, with a little dust drifting through. */
+  private addWindowLight(root: THREE.Object3D): void {
+    const geometry = this.bag.add(new THREE.BoxGeometry(2.6, 11, 1.4));
+    geometry.translate(0, -5.5, 0);
     const material = new THREE.MeshBasicNodeMaterial({ transparent: true, depthWrite: false, blending: THREE.AdditiveBlending, side: THREE.DoubleSide });
-    const height = positionLocal.y.div(6);
-    const dust = smoothstep(0.62, 0.9, mx_noise_float(positionWorld.mul(1.6).add(time.mul(0.08))));
-    material.colorNode = color('#fff1dc').mul(height.pow(1.6).mul(0.05).add(dust.mul(0.02)));
+    const along = positionLocal.y.negate().div(11);
+    const dust = smoothstep(0.62, 0.9, mx_noise_float(positionWorld.mul(1.4).add(time.mul(0.06))));
+    material.colorNode = color('#fff0d6').mul(float(1).sub(along).pow(1.4).mul(0.045).add(dust.mul(0.018)));
     this.bag.add(material);
-    for (let k = 0; k < 5; k++) {
-      const anchor = root.getObjectByName(`sky_${k}`);
-      if (!anchor) continue;
+    const down = new THREE.Vector3(0, -1, 0);
+    root.traverse((o) => {
+      if (!/^window_-1_\d+_at$/.test(o.name)) return;
       const beam = new THREE.Mesh(geometry, material);
-      beam.position.set(anchor.position.x, 0, anchor.position.z);
-      beam.rotation.x = 0.12;
+      beam.position.copy(o.position);
+      beam.quaternion.setFromUnitVectors(down, new THREE.Vector3(0.62, -0.78, 0).normalize());
       beam.renderOrder = 3;
       this.scene.add(beam);
-    }
+    });
+  }
+
+  /** Pools of coloured light on the floor under the west windows, in the glass's own colours. */
+  private addColourPools(root: THREE.Object3D): void {
+    const geometry = this.bag.add(new THREE.PlaneGeometry(3.4, 6.2));
+    geometry.rotateX(-Math.PI / 2);
+    const material = new THREE.MeshBasicNodeMaterial({ transparent: true, depthWrite: false, blending: THREE.AdditiveBlending });
+    const cell = uv().mul(vec2(7, 13)).floor();
+    const pick = fract(mx_noise_float(cell.mul(0.37).xyx).mul(4.7).add(0.5));
+    const tint = mix(mix(color('#2f5fb8'), color('#b8262d'), smoothstep(0.2, 0.3, pick)), mix(color('#e0a62a'), color('#2f7c45'), smoothstep(0.7, 0.8, pick)), smoothstep(0.45, 0.55, pick));
+    const edge = smoothstep(0, 0.18, uv().x).mul(smoothstep(1, 0.82, uv().x)).mul(smoothstep(0, 0.12, uv().y)).mul(smoothstep(1, 0.88, uv().y));
+    material.colorNode = tint.mul(edge.mul(0.16));
+    this.bag.add(material);
+    root.traverse((o) => {
+      if (!/^window_-1_\d+_at$/.test(o.name)) return;
+      const pool = new THREE.Mesh(geometry, material);
+      pool.position.set(o.position.x + 3.6, 0.012, o.position.z);
+      pool.rotation.y = -0.18;
+      pool.renderOrder = 1;
+      this.scene.add(pool);
+    });
+  }
+
+  /** A few warm lights where the chandeliers hang; the flames themselves are drawn bright. */
+  private addCandles(root: THREE.Object3D): void {
+    let count = 0;
+    root.traverse((o) => {
+      if (!o.name.startsWith('candle_chandelier') || count >= 4) return;
+      const light = new THREE.PointLight('#ffb561', 18, 16, 2);
+      light.position.copy(o.position).add(new THREE.Vector3(0, -0.6, 0));
+      this.scene.add(light);
+      count++;
+    });
   }
 
   /** Redraws every canvas texture, for example after a language change. */
@@ -418,7 +509,13 @@ export class AtriumScene implements WorldScene {
   private route(from: THREE.Vector3, to: THREE.Vector3): THREE.Vector3[] {
     const start = roomAt(from.x, from.z);
     const end = roomAt(to.x, to.z);
-    if (start === end) return [];
+    if (start === end) {
+      if (!crossesPedestal(from, to)) return [];
+      // round the ropes along the aisle on the target's side, in the direction of travel
+      const side = Math.sign(to.x || from.x || 1) < 0 ? ['W1', 'W2'] : ['E1', 'E2'];
+      const ordered = from.z > to.z ? side : [...side].reverse();
+      return ordered.map((id) => new THREE.Vector3(NODES[id].x, 0, NODES[id].z));
+    }
     const nearest = (p: THREE.Vector3, room: Room) => {
       let best = '';
       let bestDistance = Infinity;
@@ -506,7 +603,7 @@ export class AtriumScene implements WorldScene {
     this.updateCamera(dt, false);
 
     this.sun.target.position.copy(character.position);
-    this.sun.position.copy(character.position).add(new THREE.Vector3(4, 14, 3));
+    this.sun.position.copy(character.position).add(this.sunOffset);
     this.sun.target.updateMatrixWorld();
 
     this.detectExhibit(elapsed);

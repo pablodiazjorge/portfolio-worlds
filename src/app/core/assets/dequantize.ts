@@ -34,6 +34,13 @@ export function dequantizeMeshes(root: Object3D, include: (mesh: Mesh) => boolea
     const mesh = object as Mesh & { isInstancedMesh?: boolean };
     if (mesh.isMesh && !mesh.isInstancedMesh && include(mesh)) meshes.push(mesh);
   });
+  // identical parts share one geometry after the optimizer's dedup; each mesh bakes its own
+  // transform, so every mesh after the first gets its own copy before anything is baked
+  const seen = new Set<BufferGeometry>();
+  for (const mesh of meshes) {
+    if (seen.has(mesh.geometry)) mesh.geometry = mesh.geometry.clone();
+    seen.add(mesh.geometry);
+  }
   for (const mesh of meshes) {
     dequantizeGeometry(mesh.geometry);
     mesh.updateMatrix();

@@ -180,8 +180,17 @@ export class Character {
       const moved = this.last.distanceTo(this.position);
       this.stuckTime = moved < 0.4 * dt ? this.stuckTime + dt : 0;
       if (this.stuckTime > 1.2) {
+        // blocked: skip a waypoint, or, close to the end, settle for where we are
+        const last = this.route.length === 1;
+        const near = last && this.route[0].distanceTo(this.position) < 2.2;
         this.route.shift();
         this.stuckTime = 0;
+        if (near) {
+          this.route = [];
+          const done = this.onArrive;
+          this.onArrive = null;
+          done?.();
+        }
       }
     }
 
