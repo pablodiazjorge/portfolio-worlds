@@ -3,6 +3,7 @@ import { prefersReducedMotion } from '../../core/engine/device';
 import { injectWorldScene } from '../../core/engine/inject-world-scene';
 import { Reveal } from '../../core/scroll/reveal.directive';
 import { injectFrameLoop, injectScrollDirector } from '../../core/scroll/inject-scroll-director';
+import { ScrollDirector } from '../../core/scroll/scroll-director';
 import { Site } from '../../core/site.service';
 
 @Component({
@@ -42,7 +43,7 @@ export class AtlasPage {
   private readonly director = injectScrollDirector(this.scene, { stepped: true });
 
   private readonly host = inject(ElementRef<HTMLElement>).nativeElement as HTMLElement;
-  private stages: { section: HTMLElement; inner: HTMLElement }[] | null = null;
+  private stages: { section: HTMLElement; inner: HTMLElement; face: HTMLElement; index: number }[] | null = null;
 
   constructor() {
     let last = -1;
@@ -51,7 +52,7 @@ export class AtlasPage {
       const director = this.director();
       const gauge = this.altimeter()?.nativeElement;
       if (!director || !gauge) return;
-      if (!still) this.crossfade();
+      if (!still) this.crossfade(director);
       const k = director.keyframe();
       gauge.style.setProperty('--k', String(k / (director.count - 1)));
       const nearest = director.nearest();
@@ -66,31 +67,31 @@ export class AtlasPage {
   /**
    * Between two stops the cards cross-fade: the one leaving fades from the start of the move
    * and drifts at half the page's speed, and the one arriving does the same in reverse, so a
-   * change of card reads as a dissolve rather than a page flying past.
+   * change of card reads as a dissolve rather than a page flying past. The fade follows the
+   * director's stops, so every card, the last one included, is fully opaque where it rests.
    */
-  private crossfade(): void {
+  private crossfade(director: ScrollDirector): void {
     this.stages ??= Array.from(this.host.querySelectorAll<HTMLElement>('.hero, .stage')).flatMap((section) => {
       const inner = section.querySelector<HTMLElement>(':scope > .hero-inner, :scope > .stage-inner');
-      return inner ? [{ section, inner }] : [];
+      const index = director.indexOf(section);
+      // the opacity goes on the panel itself: on an ancestor it would switch off the panel's blur
+      const face = inner?.querySelector<HTMLElement>(':scope > .panel') ?? inner;
+      return inner && face && index >= 0 ? [{ section, inner, face, index }] : [];
     });
+    const k = director.keyframe();
     const viewport = window.innerHeight;
-    for (const { section, inner } of this.stages) {
+    for (const { section, inner, face, index } of this.stages) {
+      // stops travelled from this card's own, positive once it is leaving
+      const away = k - index;
+      const opacity = away >= 0 ? 1 - smoothstep(0, 0.6, away) : 1 - smoothstep(0.1, 0.6, -away);
       const rect = section.getBoundingClientRect();
-      let opacity: number;
-      let drift: number;
-      if (rect.top <= 0) {
-        // leaving: progress over the whole travel to the next stop, which is the section's height
-        const travelled = -rect.top / Math.max(1, rect.height);
-        opacity = 1 - smoothstep(0, 0.6, travelled);
-        const pinnedTop = Math.min(0, rect.bottom - viewport);
-        drift = -0.5 * pinnedTop;
-      } else {
-        opacity = 1 - smoothstep(0.15, 0.85, rect.top / viewport);
-        drift = -0.5 * rect.top;
-      }
-      inner.style.opacity = opacity.toFixed(3);
-      inner.style.transform = drift ? `translate3d(0, ${drift.toFixed(1)}px, 0)` : '';
+      // arriving it rises at half speed; leaving it stays pinned until the section runs out
+      const drift = rect.top > 0 ? -0.5 * rect.top : -0.5 * Math.min(0, rect.bottom - viewport);
+      face.style.opacity = opacity.toFixed(3);
+      // hiding the whole layer, not just the panel, keeps it from catching clicks meant for the
+      // card underneath while it drifts over it
       inner.style.visibility = opacity < 0.01 ? 'hidden' : '';
+      inner.style.transform = Math.abs(drift) >= 0.5 ? `translate3d(0, ${drift.toFixed(1)}px, 0)` : '';
     }
   }
 

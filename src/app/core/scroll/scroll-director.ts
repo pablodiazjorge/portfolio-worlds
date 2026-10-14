@@ -101,6 +101,11 @@ export class ScrollDirector {
     return i + smootherstep(clamp01((local - hold) / (1 - 2 * hold)));
   }
 
+  /** Position of an element among the anchors, or -1 when it is not one. */
+  indexOf(anchor: HTMLElement): number {
+    return this.options.anchors.indexOf(anchor);
+  }
+
   /** Index of the anchor closest to the viewport centre. */
   nearest(): number {
     const y = window.scrollY;

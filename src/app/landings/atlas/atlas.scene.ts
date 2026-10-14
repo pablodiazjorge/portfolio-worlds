@@ -11,6 +11,7 @@ import {
   normalFlat,
   normalize,
   normalView,
+  normalWorld,
   positionLocal,
   positionWorld,
   positionWorldDirection,
@@ -25,7 +26,7 @@ import {
   color,
 } from 'three/tsl';
 import { CSMShadowNode } from 'three/addons/csm/CSMShadowNode.js';
-import { mergeGeometries } from 'three/addons/utils/BufferGeometryUtils.js';
+import { mergeGeometries, mergeVertices } from 'three/addons/utils/BufferGeometryUtils.js';
 import { dequantizeMeshes } from '../../core/assets/dequantize';
 import { loadGltf } from '../../core/assets/gltf';
 import { DisposeBag, disposeObject } from '../../core/engine/dispose';
@@ -128,6 +129,8 @@ export class AtlasScene implements WorldScene {
   private readonly uMist = uniform(1);
   /** How much of the hard facet survives on the terrain: 0 smooth, 1 fully faceted. */
   private readonly uFacet = uniform(0.25);
+  /** The same for the clouds, which are larger on screen and softer by nature. */
+  private readonly uCloudFacet = uniform(0.12);
 
   private readonly sunDir = new THREE.Vector3();
   private readonly lightDir = new THREE.Vector3();
@@ -551,13 +554,14 @@ export class AtlasScene implements WorldScene {
    * Two kinds of cloud: tall cumulus built from dented puffs, and long flat bands that slip
    * between the far ranges. Both are shaded by hand from the sky's own colours: the sun's tint
    * on the faces that turn to it, a cool lavender underneath and a bright edge against the light.
+   * Like the terrain they are shaded smooth with a hint of their facets left in.
    */
   private addClouds(): void {
     const random = mulberry32(11);
     const material = new THREE.MeshBasicNodeMaterial();
     const view = normalize(cameraPosition.sub(positionWorld));
     const flat = normalize(cross(positionWorld.dFdx(), positionWorld.dFdy()));
-    const n = flat.mul(dot(flat, view).sign());
+    const n = mix(normalWorld, flat.mul(dot(flat, view).sign()), this.uCloudFacet).normalize();
     const sunward = smoothstep(-0.35, 0.9, dot(n, this.uSunDir));
     const top = smoothstep(-0.25, 0.85, n.y);
     const shade = mix(this.uZenith, this.uHorizon, 0.45).mul(0.95);
@@ -568,7 +572,12 @@ export class AtlasScene implements WorldScene {
     this.bag.add(material);
 
     const puff = (r: number, x: number, y: number, z: number, seed: number, squash = 0.72) => {
-      const g = new THREE.IcosahedronGeometry(r, 2);
+      // welded, so the normals can be smoothed across the faces
+      const sphere = new THREE.IcosahedronGeometry(r, 4);
+      sphere.deleteAttribute('normal');
+      sphere.deleteAttribute('uv');
+      const g = mergeVertices(sphere);
+      sphere.dispose();
       const position = g.getAttribute('position');
       const p = new THREE.Vector3();
       for (let i = 0; i < position.count; i++) {
@@ -611,6 +620,7 @@ export class AtlasScene implements WorldScene {
       for (let i = 0; i < position.count; i++) {
         if (position.getY(i) < 0) position.setY(i, position.getY(i) * 0.2);
       }
+      merged.computeVertexNormals();
       return this.bag.add(merged);
     };
 
@@ -629,6 +639,7 @@ export class AtlasScene implements WorldScene {
       } while (blocksOpening(cloud.position));
       cloud.scale.setScalar(0.8 + random() * 1.1);
       cloud.userData['speed'] = 0.6 + random() * 0.8;
+      cloud.userData['span'] = 330;
       this.clouds.add(cloud);
     }
     for (let c = 0; c < 9; c++) {
@@ -641,6 +652,7 @@ export class AtlasScene implements WorldScene {
       band.rotation.y = -angle + Math.PI / 2;
       band.scale.setScalar(1.4 + random() * 1.2);
       band.userData['speed'] = 0.25 + random() * 0.3;
+      band.userData['span'] = 520;
       this.clouds.add(band);
     }
     this.scene.add(this.clouds);
@@ -729,7 +741,9 @@ export class AtlasScene implements WorldScene {
     if (this.clouds && !reduced) {
       for (const cloud of this.clouds.children) {
         cloud.position.x += dt * (cloud.userData['speed'] as number);
-        if (cloud.position.x > 330) cloud.position.x = -290;
+        // each kind wraps round at its own distance, the bands well beyond the far ranges
+        const span = cloud.userData['span'] as number;
+        if (cloud.position.x > span) cloud.position.x -= 2 * span - 40;
       }
     }
   }
