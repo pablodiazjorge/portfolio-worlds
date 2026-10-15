@@ -378,15 +378,16 @@ for side in (-1, 1):
         box("solid", "stone", min(x_in, x_in - side * PIER_D), max(x_in, x_in - side * PIER_D), yb - PIER_W / 2, yb + PIER_W / 2, 0, WALL - 0.6, f"pier_{side}_{k}")
         for dy in (-0.3, 0.0, 0.3):
             cyl("decor", "stone", (x_in - side * (PIER_D + 0.1), yb + dy, 0.6), (x_in - side * (PIER_D + 0.1), yb + dy, WALL - 0.6), 0.13, seg=10, name=f"shaft_{side}_{k}_{dy}")
-        box("decor", "stone_dark", min(x_in, x_in - side * (PIER_D + 0.3)), max(x_in, x_in - side * (PIER_D + 0.3)), yb - 0.55, yb + 0.55, 0, 0.6, f"pier_base_{side}_{k}")
+        # the bases of the end piers stop at the wall faces, so nothing pokes through into the aisles
+        box("decor", "stone_dark", min(x_in, x_in - side * (PIER_D + 0.3)), max(x_in, x_in - side * (PIER_D + 0.3)), max(yb - 0.55, Y0), min(yb + 0.55, Y_ARCH - 0.45), 0, 0.6, f"pier_base_{side}_{k}")
         box("decor", "stone_dark", min(x_in, x_in - side * (PIER_D + 0.32)), max(x_in, x_in - side * (PIER_D + 0.32)), yb - 0.56, yb + 0.56, WALL - 0.6, WALL - 0.34, f"capital_{side}_{k}")
         box("decor", "gold", min(x_in, x_in - side * (PIER_D + 0.34)), max(x_in, x_in - side * (PIER_D + 0.34)), yb - 0.58, yb + 0.58, WALL - 0.62, WALL - 0.56, f"capital_fillet_{side}_{k}")
         box("decor", "stone_dark", min(x_in, x_in - side * (PIER_D + 0.38)), max(x_in, x_in - side * (PIER_D + 0.38)), yb - 0.62, yb + 0.62, WALL - 0.34, WALL, f"abacus_{side}_{k}")
     # a cornice along the top of the wall and a plinth course along the bottom
-    box("decor", "stone_dark", min(x_in - side * 0.3, x_out), max(x_in - side * 0.3, x_out), Y0, Y_ARCH, WALL - 0.3, WALL, f"cornice_{side}")
-    box("decor", "stone_dark", min(x_in - side * 0.1, x_out), max(x_in - side * 0.1, x_out), Y0, Y_ARCH, 0, 0.5, f"plinth_course_{side}")
+    box("decor", "stone_dark", min(x_in - side * 0.3, x_out), max(x_in - side * 0.3, x_out), Y0, Y_ARCH - 0.45, WALL - 0.3, WALL, f"cornice_{side}")
+    box("decor", "stone_dark", min(x_in - side * 0.1, x_out), max(x_in - side * 0.1, x_out), Y0, Y_ARCH - 0.45, 0, 0.5, f"plinth_course_{side}")
     # a string course under the windows, between the panels and the sills
-    box("decor", "stone_dark", min(x_in - side * 0.1, x_out), max(x_in - side * 0.1, x_out), Y0, Y_ARCH, SILL - 0.3, SILL - 0.14, f"string_{side}")
+    box("decor", "stone_dark", min(x_in - side * 0.1, x_out), max(x_in - side * 0.1, x_out), Y0, Y_ARCH - 0.45, SILL - 0.3, SILL - 0.14, f"string_{side}")
 
 # the entrance wall: a tall doorway with a dark wooden door, a great window above it
 DOOR_HW, DOOR_Z = 1.6, 4.4
@@ -436,12 +437,7 @@ pierced_wall("wall_gallery", "stone", "decor", "y", Y_ARCH, -HW - T, HW + T, BAL
 stained_window("window_gallery", "y", Y_ARCH, 0.0, GW_HW, GW_SILL, GW_SPRING, GW_APEX, "s", depth=-0.1)
 stained_window("window_gallery_back", "y", Y_ARCH, 0.0, GW_HW, GW_SILL, GW_SPRING, GW_APEX, "n", depth=0.1)
 pw.empty("window_gallery_at", (0, Y_ARCH, (GW_SILL + GW_APEX) / 2))
-# on the hall face of the arch wall: a small painting to the left, a banner to the right
-box("decor", "stone_dark", -4.9, -2.9, Y_ARCH - 0.45 - 0.14, Y_ARCH - 0.45, 6.6, 9.4, "arch_moulding")
-box("decor", "stone_dark", -4.7, -3.1, Y_ARCH - 0.45 - 0.17, Y_ARCH - 0.45 - 0.14, 6.8, 9.2, "arch_panel")
-for (xx0, xx1, zz0, zz1) in ((-4.5, -3.3, 7.05, 7.2), (-4.5, -3.3, 8.8, 8.95), (-4.5, -4.35, 7.2, 8.8), (-3.45, -3.3, 7.2, 8.8)):
-    box("decor", "gold", xx0, xx1, Y_ARCH - 0.45 - 0.25, Y_ARCH - 0.45 - 0.17, zz0, zz1)
-quad("deco_canvas", "canvas", (-3.9, Y_ARCH - 0.45 - 0.19, 8.0), 1.05, 1.6, "s", group="decor")
+# the hall face of the arch wall keeps only its banners: the stone stays bare between them
 
 # --- the second room: a narrower nave between arcades, side aisles behind them ------------------
 bays2 = [(Y_ARCH + k * BAY, Y_ARCH + (k + 1) * BAY) for k in range(6)]
@@ -557,7 +553,7 @@ for i, (facing, px, py, scale) in enumerate(paintings):
         for (yy0, yy1, zz0, zz1) in ((py - w / 2 - 0.08, py + w / 2 + 0.08, z - h / 2 - 0.08, z - h / 2), (py - w / 2 - 0.08, py + w / 2 + 0.08, z + h / 2, z + h / 2 + 0.08), (py - w / 2 - 0.08, py - w / 2, z - h / 2, z + h / 2), (py + w / 2, py + w / 2 + 0.08, z - h / 2, z + h / 2)):
             box("decor", "brass", min(px + 0.1 * d, px + 0.14 * d), max(px + 0.1 * d, px + 0.14 * d), yy0, yy1, zz0, zz1)
         quad(f"canvas_{i}", "canvas", (px + 0.02 * d, py, z), w, h, facing)
-        quad(f"label_{i}", "label", (px + 0.01 * d, py, z - h / 2 - 0.5), 0.6, 0.26, facing)
+        quad(f"label_{i}", "label", (px + 0.01 * d, py, z - h / 2 - 0.5), 1.0, 0.44, facing)
         pw.empty(f"spot_canvas_{i}", (px + 1.9 * d, py, 0))
         pw.empty(f"light_{i}", (px + 0.3 * d, py, z + h / 2 + 0.6))
         cyl("decor", "brass", (px, py, z + h / 2 + 0.62), (px + 0.36 * d, py, z + h / 2 + 0.5), 0.02, seg=6, name=f"picture_light_arm_{i}")
@@ -566,7 +562,7 @@ for i, (facing, px, py, scale) in enumerate(paintings):
         for (xx0, xx1, zz0, zz1) in ((px - w / 2 - 0.2, px + w / 2 + 0.2, z - h / 2 - 0.2, z - h / 2), (px - w / 2 - 0.2, px + w / 2 + 0.2, z + h / 2, z + h / 2 + 0.2), (px - w / 2 - 0.2, px - w / 2, z - h / 2, z + h / 2), (px + w / 2, px + w / 2 + 0.2, z - h / 2, z + h / 2)):
             box("decor", "gold", xx0, xx1, py - 0.1, py, zz0, zz1)
         quad(f"canvas_{i}", "canvas", (px, py - 0.02, z), w, h, facing)
-        quad(f"label_{i}", "label", (px, py - 0.01, z - h / 2 - 0.5), 0.8, 0.34, facing)
+        quad(f"label_{i}", "label", (px, py - 0.01, z - h / 2 - 0.5), 1.3, 0.57, facing)
         pw.empty(f"spot_canvas_{i}", (px, py - 4.5, 0))
         pw.empty(f"light_{i}", (px, py - 0.4, z + h / 2 + 0.6))
 

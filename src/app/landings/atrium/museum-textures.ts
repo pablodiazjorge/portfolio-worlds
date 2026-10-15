@@ -85,27 +85,29 @@ function brassPlate(ctx: CanvasRenderingContext2D, w: number, h: number): void {
 
 export function drawLabel(panel: PanelTexture, project: ProjectEntry, medium: string): void {
   panel.draw((ctx, w, h) => {
+    // everything scales with the canvas width, so a bigger plate keeps the same layout at a larger size
+    const k = w / 512;
     brassPlate(ctx, w, h);
     ctx.fillStyle = '#2e2012';
-    ctx.font = `600 54px ${SERIF}`;
-    const titleLines = wrap(ctx, project.title, w - 64).slice(0, 2);
-    let y = 74;
+    ctx.font = `600 ${Math.round(58 * k)}px ${SERIF}`;
+    const titleLines = wrap(ctx, project.title, w - 64 * k).slice(0, 2);
+    let y = 76 * k;
     for (const line of titleLines) {
-      ctx.fillText(line, 32, y);
-      y += 50;
+      ctx.fillText(line, 32 * k, y);
+      y += 54 * k;
     }
-    ctx.font = `500 28px ${SERIF}`;
+    ctx.font = `500 ${Math.round(30 * k)}px ${SERIF}`;
     ctx.fillStyle = '#3f2e18';
     if (project.year) {
-      ctx.fillText(project.year, 32, y + 4);
-      y += 38;
+      ctx.fillText(project.year, 32 * k, y + 4 * k);
+      y += 40 * k;
     }
-    ctx.font = `500 24px ${SERIF}`;
-    const mediumLines = wrap(ctx, `${medium}: ${project.tech.slice(0, 3).join(', ')}`, w - 64).slice(0, 3);
-    y += 8;
+    ctx.font = `500 ${Math.round(26 * k)}px ${SERIF}`;
+    const mediumLines = wrap(ctx, `${medium}: ${project.tech.slice(0, 3).join(', ')}`, w - 64 * k).slice(0, 3);
+    y += 8 * k;
     for (const line of mediumLines) {
-      ctx.fillText(line, 32, y);
-      y += 30;
+      ctx.fillText(line, 32 * k, y);
+      y += 32 * k;
     }
   });
 }
