@@ -244,7 +244,7 @@ def clip(name, frames, fn, loop=True):
 
 A_THIGH, B_SHIN = 0.36, 0.35  # hip to knee, knee to ankle
 ANKLE_Z = 0.09
-REACH = (A_THIGH + B_SHIN) * 0.985  # the leg never locks straight
+REACH = (A_THIGH + B_SHIN) * 0.995  # the leg never quite locks straight
 
 
 def leg_ik(frame, side, ankle_fwd, ankle_z, hip_z, foot_pitch, toe_pitch):
@@ -304,7 +304,31 @@ def foot_cycle(u, speed, cycle, stance, contact_ahead, lift):
     return fwd, z, pitch, toe
 
 
-def gait(f, t, speed, cycle, stance, contact_ahead, lift, hip_nominal, flight_rise, arms, elbow0, elbow1, lean, sway, twist, lag):
+def hip_floor(t, speed, cycle, stance, contact_ahead, lift):
+    """The highest the hips can sit at t with every planted foot reachable (ground lock)."""
+    floors = []
+    for offset in (0.0, 0.5):
+        u = (t + offset) % 1.0
+        if u < stance:
+            fwd, z, _pitch, _toe = foot_cycle(u, speed, cycle, stance, contact_ahead, lift)
+            floors.append(z + math.sqrt(max(0.0, REACH * REACH - fwd * fwd)))
+    return min(floors) if floors else None
+
+
+def hip_height(t, speed, cycle, stance, contact_ahead, lift, hip_nominal, bob_top):
+    """A smooth bob: a cosine with two dips per cycle whose lowest points are the ground lock at
+    the contacts and whose crest sits at `bob_top` (passing, or mid-flight when running), never
+    above what the planted legs allow."""
+    # the trough sits where the planted legs allow least (the contact), the crest a quarter later
+    samples = [(hip_floor(u / 100, speed, cycle, stance, contact_ahead, lift), u / 100) for u in range(0, int(stance * 100) + 1)]
+    low, trough = min((v, u) for v, u in samples if v is not None)
+    top = hip_nominal
+    h = top - (top - low) * (1 - math.cos(4 * math.pi * (t - trough - 0.25))) / 2
+    floor = hip_floor(t, speed, cycle, stance, contact_ahead, lift)
+    return min(h, floor) if floor is not None else h
+
+
+def gait(f, t, speed, cycle, stance, contact_ahead, lift, hip_nominal, bob_top, arms, elbow0, elbow1, lean, sway, twist, lag):
     """One cycle of a gait with the left heel striking at t = 0 and the right half a cycle later.
     The hips sit as high as the planted legs allow (ground lock), which gives the dip at each
     contact and the rise at passing, or on a parabola during a flight phase; the pelvis shifts and
@@ -312,23 +336,12 @@ def gait(f, t, speed, cycle, stance, contact_ahead, lift, hip_nominal, flight_ri
     against the legs with the elbow bending as the arm comes forward, and the antenna lags."""
     p = math.tau * t
     feet = {"L": foot_cycle(t % 1.0, speed, cycle, stance, contact_ahead, lift), "R": foot_cycle((t + 0.5) % 1.0, speed, cycle, stance, contact_ahead, lift)}
-    planted = []
-    for side, (fwd, z, pitch, toe) in feet.items():
-        u = (t + (0.0 if side == "L" else 0.5)) % 1.0
-        if u < stance:
-            planted.append(z + math.sqrt(max(0.0, REACH * REACH - fwd * fwd)))
-    if planted:
-        hip_z = min(hip_nominal, min(planted))
-    else:
-        # flight: both feet in the air, the body on a small parabola above the stance height
-        u_l = (t % 1.0)
-        w = ((u_l - stance) % 0.5) / (0.5 - stance)
-        hip_z = hip_nominal + flight_rise * math.sin(math.pi * w)
+    hip_z = hip_height(t % 1.0, speed, cycle, stance, contact_ahead, lift, hip_nominal, bob_top)
     for side, (fwd, z, pitch, toe) in feet.items():
         leg_ik(f, side, fwd, z, hip_z, pitch, toe)
     # the pelvis: over the stance leg, rolling and turning with it; the chest answers a frame late
     lat = sway * math.sin(p)
-    pose(f, "hips", fwd=lean * 0.3, roll=-0.045 * math.sin(p), yaw=-twist * math.cos(p), loc=(lat, hip_z - 0.80, 0.0))
+    pose(f, "hips", fwd=lean * 0.3, roll=-0.03 * math.sin(p), yaw=-twist * math.cos(p), loc=(lat, hip_z - 0.80, 0.0))
     pose(f, "spine", fwd=lean * 0.3, yaw=twist * math.cos(p - lag), roll=0.03 * math.sin(p - lag))
     pose(f, "chest", fwd=lean * 0.4, yaw=twist * math.cos(p - lag), roll=0.035 * math.sin(p - lag))
     pose(f, "neck", fwd=-lean * 0.3)
@@ -347,8 +360,9 @@ def gait(f, t, speed, cycle, stance, contact_ahead, lift, hip_nominal, flight_ri
 # walking at 1.4 m/s in 36 frames (0.75 s): 2 steps of 0.525 m per cycle, the stance 56 % of the
 # cycle with 6 % of double support; running at 4.6 m/s in 28 frames (0.583 s): the stance 22 %
 # of the cycle, so each step flies for 28 % of it
-WALK = dict(speed=1.4, cycle=0.75, stance=0.56, contact_ahead=0.0, lift=0.06, hip_nominal=0.795, flight_rise=0.0, arms=0.35, elbow0=0.25, elbow1=0.3, lean=0.04, sway=0.02, twist=0.08, lag=0.17)
-RUN = dict(speed=4.6, cycle=0.583, stance=0.22, contact_ahead=0.1, lift=0.2, hip_nominal=0.73, flight_rise=0.045, arms=0.6, elbow0=1.45, elbow1=0.2, lean=0.2, sway=0.015, twist=0.1, lag=0.15)
+# the crest of the bob sits at the passing position when walking and at mid-flight when running
+WALK = dict(speed=1.4, cycle=0.75, stance=0.56, contact_ahead=0.0, lift=0.06, hip_nominal=0.785, bob_top=0.25, arms=0.35, elbow0=0.25, elbow1=0.3, lean=0.04, sway=0.02, twist=0.08, lag=0.17)
+RUN = dict(speed=4.6, cycle=0.583, stance=0.22, contact_ahead=0.03, lift=0.18, hip_nominal=0.765, bob_top=0.36, arms=0.6, elbow0=1.45, elbow1=0.2, lean=0.2, sway=0.012, twist=0.1, lag=0.15)
 clip("Walking", 36, lambda f, t: gait(f, t, **WALK))
 clip("Running", 28, lambda f, t: gait(f, t, **RUN))
 
@@ -404,6 +418,21 @@ clip("ThumbsUp", int(FPS * 1.2), thumbs, loop=False)
 bpy.ops.object.select_all(action="DESELECT")
 pw.export_glb(OUT, animations=True)
 print(f"[visitor] {len(body.data.polygons)} faces, {len(arm_data.bones)} bones, {len(bpy.data.actions)} actions")
+
+if "--measure" in argv:
+    # the height of the hips and of both toe joints at every frame of each gait, to check the bob
+    for name in ("Walking", "Running"):
+        action = bpy.data.actions[name]
+        rig.animation_data.action = action
+        rows = []
+        for frame in range(int(action.frame_range[1]) + 1):
+            scene.frame_set(frame)
+            hz = (rig.matrix_world @ rig.pose.bones["hips"].head).z
+            tl = (rig.matrix_world @ rig.pose.bones["toe.L"].head).z
+            tr = (rig.matrix_world @ rig.pose.bones["toe.R"].head).z
+            rows.append(f"{frame}:{hz:.3f}/{tl:.3f}/{tr:.3f}")
+        rig.animation_data.action = None
+        print("[measure]", name, " ".join(rows))
 
 if PREVIEW:
     os.makedirs(PREVIEW, exist_ok=True)
