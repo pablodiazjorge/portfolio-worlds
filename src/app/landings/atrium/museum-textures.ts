@@ -85,29 +85,57 @@ function brassPlate(ctx: CanvasRenderingContext2D, w: number, h: number): void {
 
 export function drawLabel(panel: PanelTexture, project: ProjectEntry, medium: string): void {
   panel.draw((ctx, w, h) => {
-    // everything scales with the canvas width, so a bigger plate keeps the same layout at a larger size
-    const k = w / 512;
+    // the title gets the largest size that fits one line, or two lines a little smaller; the year
+    // and the medium keep their size; the whole block is measured from explicit baselines and centred
     brassPlate(ctx, w, h);
-    ctx.fillStyle = '#2e2012';
-    ctx.font = `600 ${Math.round(58 * k)}px ${SERIF}`;
-    const titleLines = wrap(ctx, project.title, w - 64 * k).slice(0, 2);
-    let y = 76 * k;
-    for (const line of titleLines) {
-      ctx.fillText(line, 32 * k, y);
-      y += 54 * k;
+    const margin = w * 0.045;
+    const usable = w - margin * 2;
+    const titleFont = (size: number) => `600 ${Math.round(size)}px ${SERIF}`;
+    let titleSize = h * 0.26;
+    let titleLines: string[] = [];
+    for (;;) {
+      ctx.font = titleFont(titleSize);
+      titleLines = wrap(ctx, project.title, usable);
+      if (titleLines.length === 1 || titleSize <= h * 0.2) break;
+      titleSize -= h * 0.01;
     }
-    ctx.font = `500 ${Math.round(30 * k)}px ${SERIF}`;
-    ctx.fillStyle = '#3f2e18';
+    if (titleLines.length > 1) {
+      titleSize = h * 0.2;
+      ctx.font = titleFont(titleSize);
+      titleLines = wrap(ctx, project.title, usable).slice(0, 2);
+    }
+    const yearSize = h * 0.11;
+    let mediumSize = h * 0.105;
+    const tech = `${medium}: ${project.tech.slice(0, 3).join(', ')}`;
+    ctx.font = `500 ${Math.round(mediumSize)}px ${SERIF}`;
+    let mediumLines = wrap(ctx, tech, usable);
+    if (mediumLines.length > 2) {
+      mediumSize = h * 0.09;
+      ctx.font = `500 ${Math.round(mediumSize)}px ${SERIF}`;
+      mediumLines = wrap(ctx, tech, usable).slice(0, 3);
+    }
+    // baselines measured from the top of the block
+    const baselines: { text: string; y: number; font: string; colour: string }[] = [];
+    let y = titleSize * 0.78;
+    titleLines.forEach((line, i) => {
+      if (i) y += titleSize * 1.02;
+      baselines.push({ text: line, y, font: titleFont(titleSize), colour: '#2e2012' });
+    });
     if (project.year) {
-      ctx.fillText(project.year, 32 * k, y + 4 * k);
-      y += 40 * k;
+      y += yearSize * 1.55;
+      baselines.push({ text: project.year, y, font: `500 ${Math.round(yearSize)}px ${SERIF}`, colour: '#3f2e18' });
     }
-    ctx.font = `500 ${Math.round(26 * k)}px ${SERIF}`;
-    const mediumLines = wrap(ctx, `${medium}: ${project.tech.slice(0, 3).join(', ')}`, w - 64 * k).slice(0, 3);
-    y += 8 * k;
-    for (const line of mediumLines) {
-      ctx.fillText(line, 32 * k, y);
-      y += 32 * k;
+    y += mediumSize * 1.5;
+    mediumLines.forEach((line, i) => {
+      if (i) y += mediumSize * 1.22;
+      baselines.push({ text: line, y, font: `500 ${Math.round(mediumSize)}px ${SERIF}`, colour: '#3f2e18' });
+    });
+    const block = y + mediumSize * 0.28;
+    const top = Math.max(h * 0.08, (h - block) / 2);
+    for (const line of baselines) {
+      ctx.font = line.font;
+      ctx.fillStyle = line.colour;
+      ctx.fillText(line.text, margin, top + line.y);
     }
   });
 }
@@ -137,31 +165,40 @@ export function drawLightbox(panel: PanelTexture, job: ExperienceEntry): void {
 
 export function drawAbout(panel: PanelTexture, portfolio: Portfolio): void {
   panel.draw((ctx, w, h) => {
+    // centred: the name across the top, the role and the focus below it, a rule and the place at the foot
     brassPlate(ctx, w, h);
+    ctx.textAlign = 'center';
     ctx.fillStyle = '#2e2012';
-    ctx.font = `600 150px ${SERIF}`;
-    ctx.fillText(portfolio.name, 60, 200);
-    ctx.font = `500 50px ${SERIF}`;
+    ctx.font = `600 ${Math.round(h * 0.27)}px ${SERIF}`;
+    ctx.fillText(portfolio.name, w / 2, h * 0.35, w * 0.9);
     ctx.fillStyle = '#3f2e18';
-    ctx.fillText(portfolio.role, 66, 290);
-    ctx.font = `500 38px ${SERIF}`;
-    ctx.fillText(portfolio.focus, 66, 350);
-    ctx.fillText(portfolio.location, 66, h - 50);
+    ctx.font = `500 ${Math.round(h * 0.11)}px ${SERIF}`;
+    ctx.fillText(portfolio.role, w / 2, h * 0.53, w * 0.9);
+    ctx.font = `500 ${Math.round(h * 0.085)}px ${SERIF}`;
+    ctx.fillText(portfolio.focus, w / 2, h * 0.675, w * 0.9);
+    ctx.fillStyle = '#8a6a3a';
+    ctx.fillRect(w / 2 - w * 0.06, h * 0.75, w * 0.12, Math.max(2, h * 0.008));
+    ctx.fillStyle = '#3f2e18';
+    ctx.font = `500 ${Math.round(h * 0.078)}px ${SERIF}`;
+    ctx.fillText(portfolio.location, w / 2, h * 0.885, w * 0.9);
   });
 }
 
 export function drawContact(panel: PanelTexture, title: string, portfolio: Portfolio): void {
   panel.draw((ctx, w, h) => {
     brassPlate(ctx, w, h);
+    ctx.textAlign = 'center';
     ctx.fillStyle = '#2e2012';
-    ctx.font = `600 130px ${SERIF}`;
-    ctx.fillText(title, 56, 170);
-    ctx.font = `500 42px ${SERIF}`;
-    ctx.fillStyle = '#3f2e18';
-    ctx.fillText(portfolio.contact.linkedin.replace('https://www.', ''), 60, 280);
-    ctx.fillText(portfolio.contact.github.replace('https://', ''), 60, 340);
+    ctx.font = `600 ${Math.round(h * 0.23)}px ${SERIF}`;
+    ctx.fillText(title, w / 2, h * 0.3, w * 0.9);
     ctx.fillStyle = '#8a6a3a';
-    ctx.fillRect(60, h - 70, 140, 4);
+    ctx.fillRect(w / 2 - w * 0.07, h * 0.38, w * 0.14, Math.max(2, h * 0.008));
+    ctx.fillStyle = '#3f2e18';
+    ctx.font = `500 ${Math.round(h * 0.095)}px ${SERIF}`;
+    ctx.fillText(portfolio.contact.linkedin.replace('https://www.', ''), w / 2, h * 0.56, w * 0.92);
+    ctx.fillText(portfolio.contact.github.replace('https://', ''), w / 2, h * 0.69, w * 0.92);
+    ctx.font = `500 ${Math.round(h * 0.075)}px ${SERIF}`;
+    ctx.fillText(portfolio.location, w / 2, h * 0.87, w * 0.9);
   });
 }
 
@@ -169,9 +206,9 @@ export function drawSign(panel: PanelTexture, text: string): void {
   panel.draw((ctx, w, h) => {
     brassPlate(ctx, w, h);
     ctx.fillStyle = '#2e2012';
-    ctx.font = `600 ${Math.round(h * 0.5)}px ${SERIF}`;
+    ctx.font = `600 ${Math.round(h * 0.58)}px ${SERIF}`;
     const width = ctx.measureText(text).width;
-    ctx.fillText(text, (w - width) / 2, h / 2 + h * 0.17);
+    ctx.fillText(text, (w - width) / 2, h / 2 + h * 0.2, w * 0.9);
   });
 }
 
@@ -185,14 +222,48 @@ export function drawPlaque(panel: PanelTexture, job: ExperienceEntry): void {
     ctx.fillStyle = brass;
     ctx.fillRect(0, 0, w, h);
     ctx.strokeStyle = '#6b5320';
-    ctx.lineWidth = 6;
+    ctx.lineWidth = Math.max(3, h / 40);
     ctx.strokeRect(12, 12, w - 24, h - 24);
     ctx.fillStyle = '#3a2a12';
     ctx.textAlign = 'center';
-    ctx.font = `600 ${Math.round(h * 0.3)}px ${SERIF}`;
-    ctx.fillText(job.role, w / 2, h * 0.46, w - 60);
-    ctx.font = `500 ${Math.round(h * 0.2)}px ${SERIF}`;
-    ctx.fillText(`${job.company}, ${job.period}`, w / 2, h * 0.78, w - 60);
+    const usable = w * 0.88;
+    // the role in the largest size that fits one line, down to a size where it takes two lines
+    let roleSize = h * 0.3;
+    let roleLines: string[] = [];
+    for (;;) {
+      ctx.font = `600 ${Math.round(roleSize)}px ${SERIF}`;
+      roleLines = wrap(ctx, job.role, usable);
+      if (roleLines.length === 1 || roleSize <= h * 0.2) break;
+      roleSize -= h * 0.01;
+    }
+    if (roleLines.length > 1) {
+      // two lines at most: the size comes down until the role fits in them
+      roleSize = h * 0.19;
+      for (;;) {
+        ctx.font = `600 ${Math.round(roleSize)}px ${SERIF}`;
+        roleLines = wrap(ctx, job.role, usable);
+        if (roleLines.length <= 2 || roleSize <= h * 0.13) break;
+        roleSize -= h * 0.005;
+      }
+      roleLines = roleLines.slice(0, 2);
+    }
+    const line = `${job.company}, ${job.period}`;
+    let lineSize = h * 0.19;
+    ctx.font = `500 ${Math.round(lineSize)}px ${SERIF}`;
+    while (ctx.measureText(line).width > usable && lineSize > h * 0.12) {
+      lineSize -= h * 0.01;
+      ctx.font = `500 ${Math.round(lineSize)}px ${SERIF}`;
+    }
+    const roleBlock = roleSize * (0.78 + (roleLines.length - 1) * 1.05);
+    const block = roleBlock + lineSize * 1.6;
+    let y = (h - block) / 2 + roleSize * 0.78;
+    ctx.font = `600 ${Math.round(roleSize)}px ${SERIF}`;
+    roleLines.forEach((text, i) => {
+      if (i) y += roleSize * 1.05;
+      ctx.fillText(text, w / 2, y);
+    });
+    ctx.font = `500 ${Math.round(lineSize)}px ${SERIF}`;
+    ctx.fillText(line, w / 2, y + lineSize * 1.5);
   });
 }
 
@@ -232,5 +303,90 @@ export function drawFace(panel: PanelTexture, open: boolean): void {
     }
     ctx.fillStyle = 'rgba(0,0,0,0.2)';
     for (let y = 0; y < h; y += 4) ctx.fillRect(0, y, w, 1);
+  });
+}
+
+/** The width of a painted quad divided by its height, read from the corners its UVs mark. */
+export function quadAspect(geometry: THREE.BufferGeometry): number {
+  const position = geometry.getAttribute('position');
+  const uv = geometry.getAttribute('uv');
+  if (!position || !uv) return 1;
+  const corner = (u: number, v: number): THREE.Vector3 | null => {
+    for (let i = 0; i < uv.count; i++) {
+      if (Math.abs(uv.getX(i) - u) < 0.01 && Math.abs(uv.getY(i) - v) < 0.01) return new THREE.Vector3().fromBufferAttribute(position, i);
+    }
+    return null;
+  };
+  const o = corner(0, 0);
+  const right = corner(1, 0);
+  const up = corner(0, 1);
+  if (!o || !right || !up) return 1;
+  const height = o.distanceTo(up);
+  return height > 1e-6 ? o.distanceTo(right) / height : 1;
+}
+
+/** The prize badge on the visitor's chest: a gold rosette with its ribbons and the words round it. */
+export function drawBadge(panel: PanelTexture, text: string): void {
+  panel.draw((ctx, w, h) => {
+    ctx.clearRect(0, 0, w, h);
+    const cx = w / 2;
+    const cy = h * 0.4;
+    const r = w * 0.4;
+    // two ribbon tails
+    ctx.fillStyle = '#b8323a';
+    for (const dir of [-1, 1]) {
+      ctx.beginPath();
+      ctx.moveTo(cx + dir * r * 0.18, cy + r * 0.5);
+      ctx.lineTo(cx + dir * r * 0.62, cy + r * 0.5);
+      ctx.lineTo(cx + dir * r * 0.78, h * 0.97);
+      ctx.lineTo(cx + dir * r * 0.5, h * 0.9);
+      ctx.lineTo(cx + dir * r * 0.3, h * 0.97);
+      ctx.closePath();
+      ctx.fill();
+    }
+    // the pleated rosette
+    ctx.fillStyle = '#d9b24a';
+    ctx.beginPath();
+    for (let i = 0; i < 32; i++) {
+      const a = (i / 32) * Math.PI * 2;
+      const rr = i % 2 ? r : r * 0.86;
+      ctx.lineTo(cx + Math.cos(a) * rr, cy + Math.sin(a) * rr);
+    }
+    ctx.closePath();
+    ctx.fill();
+    ctx.strokeStyle = '#8a6a1e';
+    ctx.lineWidth = Math.max(2, w * 0.012);
+    ctx.stroke();
+    // the centre disc with the words round it and a star in the middle
+    ctx.fillStyle = '#2f4466';
+    ctx.beginPath();
+    ctx.arc(cx, cy, r * 0.62, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.strokeStyle = '#e9d58a';
+    ctx.lineWidth = Math.max(2, w * 0.014);
+    ctx.stroke();
+    ctx.fillStyle = '#f3e6b0';
+    ctx.font = `700 ${Math.round(r * 0.19)}px ${SANS}`;
+    ctx.textAlign = 'center';
+    ctx.textBaseline = 'middle';
+    const letters = text.toUpperCase().split('');
+    const span = Math.PI * 1.25;
+    letters.forEach((ch, i) => {
+      const a = -Math.PI / 2 - span / 2 + (span * (i + 0.5)) / letters.length;
+      ctx.save();
+      ctx.translate(cx + Math.cos(a) * r * 0.47, cy + Math.sin(a) * r * 0.47);
+      ctx.rotate(a + Math.PI / 2);
+      ctx.fillText(ch, 0, 0);
+      ctx.restore();
+    });
+    ctx.fillStyle = '#e9d58a';
+    ctx.beginPath();
+    for (let i = 0; i < 10; i++) {
+      const a = -Math.PI / 2 + (i / 10) * Math.PI * 2;
+      const rr = i % 2 ? r * 0.1 : r * 0.24;
+      ctx.lineTo(cx + Math.cos(a) * rr, cy + r * 0.06 + Math.sin(a) * rr);
+    }
+    ctx.closePath();
+    ctx.fill();
   });
 }

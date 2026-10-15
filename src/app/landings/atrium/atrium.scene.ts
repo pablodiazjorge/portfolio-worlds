@@ -7,7 +7,7 @@ import { loadGltf } from '../../core/assets/gltf';
 import { DisposeBag, disposeObject } from '../../core/engine/dispose';
 import { EngineContext, WorldScene } from '../../core/engine/world-scene';
 import { Character, FloorBox, MoveInput } from './character';
-import { drawAbout, drawContact, drawFace, drawLabel, drawLightbox, drawSign, loadMuseumFonts, MuseumCopy, PanelTexture, drawPlaque } from './museum-textures';
+import { drawAbout, drawBadge, drawContact, drawFace, drawLabel, drawLightbox, drawSign, loadMuseumFonts, MuseumCopy, PanelTexture, drawPlaque, quadAspect } from './museum-textures';
 
 export type ExhibitKind = 'about' | 'experience' | 'project' | 'contact';
 
@@ -83,6 +83,7 @@ export class AtriumScene implements WorldScene {
   readonly exhibits: Exhibit[] = [];
   private readonly clickables: THREE.Mesh[] = [];
   private readonly panels = new Map<string, PanelTexture>();
+  private badge: PanelTexture | null = null;
   private face: PanelTexture | null = null;
   private envTexture: THREE.Texture | null = null;
   private blinkAt = 3;
@@ -328,10 +329,11 @@ export class AtriumScene implements WorldScene {
         mesh.userData['exhibit'] = `project-${index}`;
         this.clickables.push(mesh);
       } else if (name.startsWith('label_') || name.startsWith('exp_') || name.startsWith('sign_') || name.startsWith('plaque_') || name === 'about_panel' || name === 'contact_panel') {
-        const size: Record<string, [number, number]> = { label: [1024, 450], exp: [1024, 648], sign: [1024, 256], plaque: [640, 256], about: [1400, 720], contact: [1024, 568] };
+        // the canvas takes the proportions of the quad it is painted on, so nothing is stretched
+        const heights: Record<string, number> = { label: 450, exp: 648, sign: 256, plaque: 256, about: 480, contact: 568 };
         const key = name.split('_')[0];
-        const [w, h] = size[key] ?? [512, 512];
-        const panel = new PanelTexture(w, h);
+        const h = heights[key] ?? 512;
+        const panel = new PanelTexture(Math.round(h * quadAspect(mesh.geometry)), h);
         this.panels.set(name, panel);
         this.bag.add(panel);
         const flat = new THREE.MeshBasicNodeMaterial();
@@ -787,11 +789,20 @@ export class AtriumScene implements WorldScene {
     const screen = new THREE.MeshBasicNodeMaterial();
     screen.colorNode = texture(panel.texture).rgb;
     this.bag.add(screen);
+    // the prize badge on the chest plate: a rosette painted once
+    const badgePanel = new PanelTexture(256, 290);
+    this.badge = this.bag.add(badgePanel);
+    drawBadge(badgePanel, 'best robot');
+    const badge = new THREE.MeshStandardNodeMaterial({ roughness: 0.5, metalness: 0.1, alphaTest: 0.5 });
+    const badgeTex = texture(badgePanel.texture);
+    badge.colorNode = badgeTex.rgb;
+    badge.opacityNode = badgeTex.a;
+    this.bag.add(badge);
     model.traverse((o) => {
       const mesh = o as THREE.Mesh;
       if (!mesh.isMesh) return;
       const materials = Array.isArray(mesh.material) ? mesh.material : [mesh.material];
-      const replaced = materials.map((m) => (m.name === 'visitor_screen' ? screen : m));
+      const replaced = materials.map((m) => (m.name === 'visitor_screen' ? screen : m.name === 'visitor_badge' ? badge : m));
       mesh.material = Array.isArray(mesh.material) ? replaced : replaced[0];
     });
   }

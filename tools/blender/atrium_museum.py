@@ -430,7 +430,7 @@ for i in range(22):
     cyl("decor", "marble", (xb, Y_ARCH - 1.45, BALC_Z + 0.35), (xb, Y_ARCH - 1.45, BALC_Z + 0.65), 0.15, seg=8, name=f"baluster_belly_{i}")
 box("decor", "marble", -HW, HW, Y_ARCH - 1.62, Y_ARCH - 1.28, BALC_Z + 0.95, BALC_Z + 1.15, "balcony_rail")
 box("decor", "marble", -HW, HW, Y_ARCH - 1.62, Y_ARCH - 1.28, BALC_Z, BALC_Z + 0.1, "balcony_rail_low")
-quad("sign_hall", "label", (0, Y_ARCH - 1.79, BALC_Z - 0.3), 3.4, 0.5, "s")
+quad("sign_hall", "label", (0, Y_ARCH - 1.79, BALC_Z - 0.3), 2.4, 0.5, "s")
 # the gallery wall above the balcony, pierced by a great window glazed on both faces
 GW_HW, GW_SILL, GW_SPRING, GW_APEX = 2.6, BALC_Z + 1.0, BALC_Z + 4.6, BALC_Z + 8.0
 pierced_wall("wall_gallery", "stone", "decor", "y", Y_ARCH, -HW - T, HW + T, BALC_Z, APEX + 0.5, opening(GW_HW, GW_SILL, GW_SPRING, GW_APEX, 14), thickness=0.6)
@@ -701,8 +701,8 @@ for k, (hx, hy, z0, z1, ch) in enumerate(((2.15, 1.75, 0.0, 0.22, 0.45), (1.9, 1
 quad("shadow_statue", "shadow_patch", (PX + 0.05, PY, 1.254), 2.6, 1.8, "up", group="decor")
 box("solid", "collider", PX - 2.15, PX + 2.15, PY - 1.75, PY + 1.75, 0, 1.25, "pedestal_collider")
 box("solid", "collider", PX - 1.25, PX + 1.25, PY - 0.85, PY + 0.85, 0, 4.4, "statue_collider")
-box("decor", "brass", PX - 0.6, PX + 0.6, PY - TOP_HY - 0.03, PY - TOP_HY, 0.82, 1.16, "plaque_back")
-quad("about_panel", "label", (PX, PY - TOP_HY - 0.04, 0.99), 1.1, 0.3, "s")
+box("decor", "brass", PX - 0.66, PX + 0.66, PY - TOP_HY - 0.03, PY - TOP_HY, 0.79, 1.25, "plaque_back")
+quad("about_panel", "label", (PX, PY - TOP_HY - 0.04, 1.02), 1.28, 0.42, "s")
 pw.empty("spot_about", (PX, PY - 3.4, 0))
 RX, RY = 2.45, 2.1
 ring = [(-RX, -RY), (0, -RY), (RX, -RY), (RX, 0), (RX, RY), (0, RY), (-RX, RY), (-RX, 0)]
