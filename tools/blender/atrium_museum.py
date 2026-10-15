@@ -112,6 +112,8 @@ def place_asset(asset, location, scale=1.0, yaw=0.0, name=None):
         o.name = f"{name or os.path.basename(asset)}_{k}" if len(_asset_cache[asset]) > 1 else (name or os.path.basename(asset))
         o.location = location
         o.scale = (scale, scale, scale)
+        # the glTF importer leaves objects in quaternion mode, where Euler angles are ignored
+        o.rotation_mode = "XYZ"
         o.rotation_euler = (0, 0, yaw)
         o.parent = groups["decor"]
         bpy.context.scene.collection.objects.link(o)
@@ -567,8 +569,27 @@ for i, (facing, px, py, scale) in enumerate(paintings):
         pw.empty(f"light_{i}", (px, py - 0.4, z + h / 2 + 0.6))
 
 # --- banners, sconces, chandeliers ---------------------------------------------------------------
-def banner(side, yc, name, top=WAPEX - 0.6, bottom=SILL + 0.4, w=1.1, x=None):
+# the banners and sconces generated with Qwen-Image and TRELLIS.2 (tools/assets/trellis) hang in
+# place of the drawn ones when their files exist; the generated banner faces -y and hangs from its
+# rod (its origin), the sconce faces -y with its origin on its back plate
+BANNER_GLB = os.path.join(ASSETS, "trellis", "banner.glb")
+SCONCE_GLB = os.path.join(ASSETS, "trellis", "sconce.glb")
+
+
+def banner(side, yc, name, top=WAPEX - 0.6, bottom=SILL + 0.4, w=1.1, x=None, face=None):
     x = side * (HW - PIER_D - 0.26 - 0.1) if x is None else x
+    if os.path.exists(BANNER_GLB):
+        # the generated banner is prepared 1.4 m wide and 2.4 m tall; in the nave it hangs 2.2 m wide
+        # from 12.6 m at right angles to the wall with its emblem to the entrance, as in the
+        # reference, on a brass pole from the pier face with a strut under it
+        sc = w * 1.45
+        face = side * (HW - PIER_D) if face is None else face
+        xc = face - side * (0.12 + 0.7 * sc)
+        zr = top - 0.4
+        place_asset("trellis/banner", (xc, yc, zr), scale=sc, yaw=0.0, name=name)
+        cyl("decor", "gold", (face, yc, zr), (xc, yc, zr), 0.025, seg=6, name=name + "_pole")
+        cyl("decor", "gold", (face, yc + 0.06, zr - 0.8), (face - side * 0.55, yc + 0.06, zr - 0.03), 0.018, seg=6, name=name + "_strut")
+        return
     bm = bmesh.new()
     pts = [(x, yc - w / 2, top), (x, yc + w / 2, top), (x, yc + w / 2, bottom + 0.7), (x, yc, bottom), (x, yc - w / 2, bottom + 0.7)]
     face = bm.faces.new([bm.verts.new(Vector(p)) for p in pts])
@@ -594,8 +615,20 @@ def banner(side, yc, name, top=WAPEX - 0.6, bottom=SILL + 0.4, w=1.1, x=None):
         box("decor", "gold", min(xe, xe - side * 0.01), max(xe, xe - side * 0.01), yc - w / 2 + 0.05 + k * (w - 0.1) / 5, yc - w / 2 + 0.15 + k * (w - 0.1) / 5, bottom + 0.62 - k * 0.14, bottom + 0.8 - k * 0.14)
 
 
-def sconce(side, yc, name, x=None, z=3.3):
+def sconce(side, yc, name, x=None, z=3.3, plate=0.11):
     x = side * (HW - PIER_D - 0.26 - 0.08) if x is None else x
+    if os.path.exists(SCONCE_GLB):
+        # the generated sconce, 1.25 m tall, its back plate on the crest of the pier's shafts (`plate`
+        # behind `x`) and its candles to the nave, with three flames where its candles end (measured
+        # on the mesh); the empty puts the scene's halo on the shafts just behind the plate
+        sc = 1.25
+        xp = x + side * plate
+        place_asset("trellis/sconce", (xp, yc, z + 0.05), scale=sc, yaw=-side * math.pi / 2, name=name)
+        for k, (dy, dz, dd) in enumerate(((-0.21 * sc, 0.23 * sc, 0.075 * sc), (0.0, 0.18 * sc, 0.12 * sc), (0.21 * sc, 0.23 * sc, 0.075 * sc))):
+            xf = xp - side * dd
+            cyl("decor", "flame", (xf, yc + dy, z + 0.05 + dz), (xf, yc + dy, z + 0.05 + dz + 0.12), 0.026, seg=6, name=f"{name}_flame_{k}", r2=0.0)
+        pw.empty(f"candle_{name}", (xp - side * 0.12, yc, z + 0.55))
+        return
     cyl("decor", "gold", (x + side * 0.25, yc, z - 0.6), (x, yc, z), 0.03, seg=6, name=name + "_arm")
     for k, dy in enumerate((-0.22, 0.0, 0.22)):
         cyl("decor", "gold", (x, yc + dy, z - 0.1), (x, yc + dy, z + 0.05), 0.06, seg=8, name=f"{name}_cup_{k}")
@@ -612,11 +645,14 @@ for side in (-1, 1):
     for k in range(1, 8):
         sconce(side, Y0 + k * BAY, f"sconce_{side}_{k}")
     for k in range(1, 6):
-        sconce(side, Y_ARCH + k * BAY, f"sconce2_{side}_{k}", x=side * (HW2 - 0.56), z=3.3)
+        sconce(side, Y_ARCH + k * BAY, f"sconce2_{side}_{k}", x=side * (HW2 - 0.56), z=3.3, plate=0.15)
     for k in (1, 3, 5):
-        banner(side, Y_ARCH + k * BAY, f"banner2_{side}_{k}", top=CL_APEX - 0.6, bottom=AR_APEX + 0.9, w=0.8, x=side * (HW2 - 0.5))
+        banner(side, Y_ARCH + k * BAY, f"banner2_{side}_{k}", top=CL_APEX - 0.4, bottom=AR_APEX + 0.9, w=1.0, x=side * (HW2 - 0.5), face=side * HW2)
 # a narrow banner hanging from the balcony rail, to the right of the arch, facing the hall
 def banner_south(xc, y, top, bottom, w, name):
+    if os.path.exists(BANNER_GLB):
+        place_asset("trellis/banner", (xc, y, top - 0.2), scale=w * 1.55, yaw=0.0, name=name)
+        return
     bm = bmesh.new()
     pts = [(xc - w / 2, y, top), (xc + w / 2, y, top), (xc + w / 2, y, bottom + 0.6), (xc, y, bottom), (xc - w / 2, y, bottom + 0.6)]
     face = bm.faces.new([bm.verts.new(Vector(p)) for p in pts])
@@ -838,7 +874,7 @@ for i, cx, cy, reader in layout:
     page_yaw = {"e": math.pi / 2, "w": -math.pi / 2, "s": 0.0}[reader]
     if i == 1:
         # the retro computer (Poly Haven, CC0) on the cloth, its screen to the reader, the page in front
-        place_asset("polyhaven/television_02", point(0.3, 0.0, 1.0), scale=1.25, yaw={"w": 0.0, "e": math.pi, "s": math.pi / 2}[reader], name="case_computer")
+        place_asset("polyhaven/television_02", point(0.3, 0.0, 1.0), scale=1.25, yaw=page_yaw, name="case_computer")
         quad(f"exp_{i}", "lightbox", point(-0.42, -0.02, 1.005), 0.72, 0.45, "up", yaw=page_yaw)
     else:
         # an open book on a low slanted stand: two leaves rising in a V from the spine, the page on top
@@ -896,7 +932,8 @@ for template in _asset_templates:
 
 # the decor is some 1800 small meshes; joined per material they become a few dozen draw calls, and
 # the runtime still finds everything it needs by name (exhibits, glass, panels, signs, empties)
-KEEP_APART = ("glass_", "canvas_", "label_", "exp_", "plaque_", "deco_canvas", "about_panel", "contact_panel", "sign_", "shadow_")
+# the generated banners and sconces stay apart so their copies keep sharing one mesh in the GLB
+KEEP_APART = ("glass_", "canvas_", "label_", "exp_", "plaque_", "deco_canvas", "about_panel", "contact_panel", "sign_", "shadow_", "banner", "sconce")
 by_material = {}
 for o in list(groups["decor"].children):
     if o.type != "MESH" or o.name.startswith(KEEP_APART):

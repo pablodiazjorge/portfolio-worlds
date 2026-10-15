@@ -1,5 +1,5 @@
 import * as THREE from 'three/webgpu';
-import { abs, color, float, fract, max, min, mix, mx_noise_float, normalWorld, pmremTexture, positionLocal, positionWorld, reflector, smoothstep, texture, time, uv, vec2 } from 'three/tsl';
+import { abs, color, float, fract, max, min, mix, mx_noise_float, normalWorld, pmremTexture, positionLocal, positionWorld, reflector, saturation, smoothstep, texture, time, uv, vec2, vec3 } from 'three/tsl';
 import { drawLandscape, drawPainting, drawStainedGlass } from './stained-glass';
 import { RoomEnvironment } from 'three/addons/environments/RoomEnvironment.js';
 import { dequantizeMeshes } from '../../core/assets/dequantize';
@@ -364,11 +364,35 @@ export class AtriumScene implements WorldScene {
         patch.colorNode = color('#1a110a');
         patch.opacityNode = smoothstep(0.3, 1.0, uv().sub(0.5).mul(2).length()).oneMinus().mul(0.6);
         material = this.bag.add(patch);
-      } else if (source.name === 'statue_tex') {
-        // the generated statue keeps its baked texture, lifted towards pale stone and matte
+      } else if (source.name.endsWith('_tex')) {
+        // a generated asset keeps its baked colour; the statue reads as matte pale stone, the props use
+        // the metallic-roughness map TRELLIS baked, so their brass and iron answer the environment
         const baked = (source as THREE.MeshStandardMaterial).map;
+        const mrMap = (source as THREE.MeshStandardMaterial).metalnessMap;
         const stone = new THREE.MeshStandardNodeMaterial({ roughness: 0.8, metalness: 0 });
-        if (baked) stone.colorNode = texture(baked).rgb.mul(1.3);
+        // the baked colours come back a little cold and grey: the statue is lifted to pale stone and
+        // the sconce's iron warmed; the banner's cloth bakes magenta (its blue above its green), so
+        // where that holds it is pulled to crimson while the brass, the fringe and the screen keep their hue
+        if (baked) {
+          const c = texture(baked).rgb;
+          const mr = mrMap ? texture(mrMap) : null;
+          if (source.name === 'banner_tex') {
+            const cloth = smoothstep(1.0, 1.6, c.b.div(c.g.max(0.002)));
+            stone.colorNode = mix(c.mul(1.12), c.mul(vec3(1.7, 0.6, 0.35)), cloth);
+            if (mr) {
+              stone.metalnessNode = mr.b.mul(0.85).mul(cloth.oneMinus());
+              stone.roughnessNode = mix(mr.g.clamp(0.3, 0.8), float(0.95), cloth);
+            }
+          } else if (source.name === 'statue_tex') {
+            stone.colorNode = c.mul(1.3);
+          } else {
+            stone.colorNode = saturation(c, 1.3).mul(vec3(1.2, 1.15, 1.08));
+            if (mr) {
+              stone.metalnessNode = mr.b.mul(0.85);
+              stone.roughnessNode = mr.g.clamp(0.35, 0.85);
+            }
+          }
+        }
         material = this.bag.add(stone);
       } else {
         material = lib.get(source.name);
@@ -378,7 +402,7 @@ export class AtriumScene implements WorldScene {
         mesh.material = material;
       }
       mesh.receiveShadow = source.name !== 'glass' && source.name !== 'flame';
-      mesh.castShadow = /^(marble|statue|statue_tex|plinth|wood|stone|stone_dark)$/.test(source.name);
+      mesh.castShadow = /^(marble|statue|statue_tex|banner_tex|plinth|wood|stone|stone_dark)$/.test(source.name);
     });
     lib.forEach((m) => this.bag.add(m));
   }
