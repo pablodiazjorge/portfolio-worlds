@@ -16,10 +16,21 @@ export interface MoveInput {
   run: boolean;
 }
 
-const WALK_SPEED = 2.1;
+const WALK_SPEED = 1.4;
 const RUN_SPEED = 4.6;
 const RADIUS = 0.42;
 const HEIGHT = 1.65;
+/** The visitor model stands this tall to the top of its head before scaling (the aerial sticks up further). */
+const MODEL_HEIGHT = 1.7;
+/** Metres one cycle of each gait covers at the model's own scale: the clips plant the feet, so these are exact. */
+const STRIDE_WALK = 1.4 * 0.75;
+const STRIDE_RUN = 4.6 * 0.583;
+const TURN_RATE = 10;
+
+const smoothstep = (x: number, a: number, b: number) => {
+  const t = Math.min(1, Math.max(0, (x - a) / (b - a)));
+  return t * t * (3 - 2 * t);
+};
 
 const lerpAngle = (from: number, to: number, t: number) => {
   let delta = (to - from) % (Math.PI * 2);
@@ -33,6 +44,14 @@ export class Character {
   readonly root = new THREE.Group();
   readonly velocity = new THREE.Vector3();
   heading = Math.PI;
+  /** The body leans into turns and accelerations through this node between the root and the model. */
+  private readonly lean = new THREE.Group();
+  private readonly modelScale: number;
+  private moveHeading = Math.PI;
+  private speedValue = 0;
+  private phase = 0;
+  private roll = 0;
+  private pitch = 0;
 
   private readonly mixer: THREE.AnimationMixer;
   private readonly actions = new Map<string, THREE.AnimationAction>();
@@ -48,18 +67,19 @@ export class Character {
     private readonly obstacles: readonly FloorBox[],
   ) {
     const model = gltf.scene;
-    const box = new THREE.Box3().setFromObject(model);
-    const scale = HEIGHT / Math.max(0.001, box.max.y - box.min.y);
+    const scale = HEIGHT / MODEL_HEIGHT;
+    this.modelScale = scale;
     model.scale.setScalar(scale);
-    model.position.y = -box.min.y * scale;
     model.traverse((o) => {
       const mesh = o as THREE.Mesh;
       if (mesh.isMesh) {
         mesh.castShadow = true;
         mesh.receiveShadow = true;
+        mesh.frustumCulled = false;
       }
     });
-    this.root.add(model);
+    this.lean.add(model);
+    this.root.add(this.lean);
 
     this.mixer = new THREE.AnimationMixer(model);
     for (const clip of gltf.animations) {
@@ -73,6 +93,8 @@ export class Character {
       action.setEffectiveWeight(name === 'Idle' ? 1 : 0);
       action.play();
     }
+    // the two gaits share one phase that this class advances by hand, so their legs never cross-fade out of step
+    for (const name of ['Walking', 'Running']) this.actions.get(name)?.setEffectiveTimeScale(0);
     this.mixer.addEventListener('finished', (event) => {
       const action = (event as unknown as { action: THREE.AnimationAction }).action;
       if (action === this.gesture) {
@@ -97,8 +119,10 @@ export class Character {
   place(x: number, z: number, heading: number): void {
     this.root.position.set(x, 0, z);
     this.heading = heading;
+    this.moveHeading = heading;
     this.root.rotation.y = heading;
     this.velocity.set(0, 0, 0);
+    this.speedValue = 0;
   }
 
   /** Walks through the given points; manual input cancels the route. */
@@ -166,10 +190,32 @@ export class Character {
       dx /= length;
       dz /= length;
     }
-    const speed = run ? RUN_SPEED : WALK_SPEED;
-    const blend = 1 - Math.exp(-dt * 8);
-    this.velocity.x += (dx * speed - this.velocity.x) * blend;
-    this.velocity.z += (dz * speed - this.velocity.z) * blend;
+    // direction and pace apart: the heading turns at a bounded rate, the pace eases with its own
+    // constants (slower to get going than to stop), so turning never drains the speed
+    const wanted = Math.min(1, length) * (run ? RUN_SPEED : WALK_SPEED);
+    const previousHeading = this.moveHeading;
+    if (length > 0.05) {
+      const target = Math.atan2(dx, dz);
+      let delta = (target - this.moveHeading) % (Math.PI * 2);
+      if (delta > Math.PI) delta -= Math.PI * 2;
+      if (delta < -Math.PI) delta += Math.PI * 2;
+      const step = Math.min(Math.abs(delta), TURN_RATE * dt);
+      this.moveHeading += Math.sign(delta) * step;
+    }
+    const tau = wanted > this.speedValue ? 0.3 : 0.2;
+    const previousSpeed = this.speedValue;
+    this.speedValue += (wanted - this.speedValue) * (1 - Math.exp(-dt / tau));
+    if (this.speedValue < 0.01) this.speedValue = 0;
+    this.velocity.set(Math.sin(this.moveHeading) * this.speedValue, 0, Math.cos(this.moveHeading) * this.speedValue);
+    // the lean: into the turn by the lateral acceleration, fore and aft by the pace change
+    const omega = dt > 0 ? ((this.moveHeading - previousHeading) / dt) : 0;
+    const accel = dt > 0 ? (this.speedValue - previousSpeed) / dt : 0;
+    const rollTarget = THREE.MathUtils.clamp(0.35 * Math.atan((this.speedValue * omega) / 9.81), -0.15, 0.15);
+    const pitchTarget = THREE.MathUtils.clamp(0.03 * accel, -0.1, 0.1);
+    const ease = 1 - Math.exp(-dt / 0.12);
+    this.roll += (rollTarget - this.roll) * ease;
+    this.pitch += (pitchTarget - this.pitch) * ease;
+    this.lean.rotation.set(this.pitch, 0, -this.roll);
 
     this.last.copy(this.position);
     this.position.x += this.velocity.x * dt;
@@ -232,19 +278,42 @@ export class Character {
     }
   }
 
+  /**
+   * Locomotion as one continuous gait: a single phase drives both cycles so the legs stay in step
+   * through the walk-to-run blend; the cadence comes from the pace and the stride each cycle covers,
+   * so the planted feet keep their grip, and below walking pace the stride shortens through the
+   * blend with the standing pose instead of the feet skating. Stopping settles on the nearest contact.
+   */
   private animate(dt: number, speed: number): void {
     const idle = this.actions.get('Idle');
     const walk = this.actions.get('Walking');
     const runAction = this.actions.get('Running');
-    const run = THREE.MathUtils.smoothstep(speed, WALK_SPEED * 1.05, RUN_SPEED * 0.85);
-    const move = THREE.MathUtils.smoothstep(speed, 0.08, 0.9);
+    const strideWalk = STRIDE_WALK * this.modelScale;
+    const strideRun = STRIDE_RUN * this.modelScale;
+    const gait = smoothstep(speed, 1.6, 3.8);
+    let cadence: number;
+    let stride = 1;
+    if (speed < WALK_SPEED) {
+      cadence = (1 / 0.75) * (0.6 + 0.4 * (speed / WALK_SPEED));
+      stride = Math.min(1, speed / (strideWalk * cadence));
+    } else {
+      cadence = THREE.MathUtils.clamp(speed / THREE.MathUtils.lerp(strideWalk, strideRun, gait), 1.3, 1.8);
+    }
+    const move = smoothstep(speed, 0.06, 0.45) * stride;
+    if (speed > 0.06) {
+      this.phase = (this.phase + dt * cadence) % 1;
+    } else {
+      // come to rest on a contact pose: the nearest of the two in the cycle
+      const rest = Math.round(this.phase * 2) / 2;
+      this.phase += (rest - this.phase) * (1 - Math.exp(-dt * 10));
+    }
+    if (walk) walk.time = (this.phase % 1) * walk.getClip().duration;
+    if (runAction) runAction.time = (this.phase % 1) * runAction.getClip().duration;
     const gestureWeight = this.gesture ? this.gesture.getEffectiveWeight() : 0;
     const base = 1 - gestureWeight * (1 - move);
     idle?.setEffectiveWeight((1 - move) * base);
-    walk?.setEffectiveWeight(move * (1 - run) * base);
-    runAction?.setEffectiveWeight(move * run * base);
-    walk?.setEffectiveTimeScale(Math.max(0.6, speed / WALK_SPEED));
-    runAction?.setEffectiveTimeScale(Math.max(0.7, speed / RUN_SPEED));
+    walk?.setEffectiveWeight(move * (1 - gait) * base);
+    runAction?.setEffectiveWeight(move * gait * base);
     this.mixer.update(dt);
   }
 
