@@ -103,6 +103,10 @@ def bm_object(name, bm, mat=None, collection_=None, smooth=False):
     mesh = bpy.data.meshes.new(name)
     bm.to_mesh(mesh)
     bm.free()
+    # a colour layer painted on the bmesh only reaches the glTF when it is the mesh's active colour
+    if mesh.color_attributes:
+        mesh.color_attributes.active_color_index = 0
+        mesh.color_attributes.render_color_index = 0
     for poly in mesh.polygons:
         poly.use_smooth = smooth
     obj = bpy.data.objects.new(name, mesh)

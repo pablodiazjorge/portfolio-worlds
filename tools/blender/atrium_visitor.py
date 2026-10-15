@@ -388,6 +388,32 @@ def idle(f, t):
 clip("Idle", FPS * 3, idle)
 
 
+def sitting(f, t):
+    # on a bench 0.56 m high: the hips drop onto the cushion, the thighs swing forward and a little
+    # down, the shins hang to the floor with the feet flat, the back eases and the hands rest on the
+    # thighs; the same slow breath as the idle
+    p = math.tau * t
+    breath = math.sin(p)
+    pose(f, "hips", fwd=-0.08, loc=(0, 0.57 - 0.80 + 0.005 * breath, 0.0))
+    pose(f, "spine", fwd=0.06 + 0.01 * breath)
+    pose(f, "chest", fwd=0.05 + 0.02 * breath)
+    pose(f, "neck", fwd=-0.03)
+    pose(f, "head", fwd=0.0, roll=0.05 * math.sin(p + 1.1), yaw=0.06 * math.sin(p * 0.5))
+    pose(f, "antenna", roll=0.08 * math.sin(p + 0.6), fwd=0.04 * math.sin(p * 0.5 - 0.5))
+    for side, sign in (("L", 1), ("R", -1)):
+        pose(f, f"thigh.{side}", fwd=1.25, roll=sign * 0.06)
+        pose(f, f"shin.{side}", fwd=-1.2)
+        pose(f, f"foot.{side}", fwd=0.0)
+        pose(f, f"toe.{side}", fwd=0.0)
+        pose(f, f"shoulder.{side}", fwd=0.04)
+        pose(f, f"upper_arm.{side}", fwd=0.55 + 0.02 * breath, roll=sign * 0.08)
+        pose(f, f"forearm.{side}", fwd=0.5)
+        pose(f, f"hand.{side}", fwd=0.35)
+
+
+clip("Sitting", FPS * 3, sitting)
+
+
 def wave(f, t):
     # the right arm goes up and out, and the forearm waves three times
     up = min(1.0, t * 4) if t < 0.8 else max(0.0, (1 - t) * 5)

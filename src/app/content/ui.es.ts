@@ -83,6 +83,8 @@ export const UI_ES: UiDict = {
     rooms: { lobby: 'Entrada', wing: 'Experiencia', hall: 'Proyectos' },
     medium: 'Técnica',
     stick: 'Mando de movimiento',
+    sit: 'Sentarse',
+    standUp: 'Levantarse',
   },
   hub: {
     title: 'Un portfolio, cinco mundos',

@@ -81,6 +81,8 @@ export const UI_EN = {
     rooms: { lobby: 'Entrance', wing: 'Experience', hall: 'Projects' },
     medium: 'Medium',
     stick: 'Movement stick',
+    sit: 'Sit down',
+    standUp: 'Stand up',
   },
   hub: {
     title: 'One portfolio, five worlds',

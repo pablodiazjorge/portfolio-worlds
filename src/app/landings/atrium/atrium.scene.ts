@@ -1,5 +1,5 @@
 import * as THREE from 'three/webgpu';
-import { abs, color, float, fract, max, min, mix, mx_noise_float, normalWorld, pmremTexture, positionLocal, positionWorld, reflector, saturation, smoothstep, texture, time, uv, vec2, vec3 } from 'three/tsl';
+import { abs, color, float, fract, max, min, mix, mx_noise_float, normalWorld, pmremTexture, positionLocal, positionWorld, reflector, saturation, smoothstep, texture, time, transformNormalToView, uv, vec2, vec3, vertexColor } from 'three/tsl';
 import { drawLandscape, drawPainting, drawStainedGlass } from './stained-glass';
 import { RoomEnvironment } from 'three/addons/environments/RoomEnvironment.js';
 import { dequantizeMeshes } from '../../core/assets/dequantize';
@@ -73,6 +73,8 @@ function crossesBox(from: THREE.Vector3, to: THREE.Vector3, box: FloorBox): bool
   return true;
 }
 
+export type SeatState = 'none' | 'sit' | 'stand';
+
 export class AtriumScene implements WorldScene {
   readonly scene = new THREE.Scene();
   readonly camera = new THREE.PerspectiveCamera(50, 1, 0.1, 200);
@@ -116,6 +118,12 @@ export class AtriumScene implements WorldScene {
   onExhibit: ((exhibit: Exhibit | null) => void) | null = null;
   /** Called the first time the visitor moves, so the page can hide the controls hint. */
   onFirstMove: (() => void) | null = null;
+  /** Called when the visitor comes within reach of the bench, or sits on it, or leaves it. */
+  onSeat: ((state: SeatState) => void) | null = null;
+  private seat: { x: number; z: number; heading: number; approachX: number; approachZ: number } | null = null;
+  private seatState: SeatState = 'none';
+  private readonly sconceSpots: THREE.Vector3[] = [];
+  private readonly sconceLights: { light: THREE.PointLight; spot: number; target: number }[] = [];
   private moved = false;
 
   constructor(
@@ -218,30 +226,68 @@ export class AtriumScene implements WorldScene {
     const texLoader = new THREE.TextureLoader();
     const marbleMap = this.bag.add(texLoader.load('textures/atrium/marble-diffuse.webp'));
     const marbleRough = this.bag.add(texLoader.load('textures/atrium/marble-rough.webp'));
-    for (const t of [marbleMap, marbleRough]) {
+    // a fine woven fabric (ambientCG, CC0) dyed crimson for the bench cushion
+    const fabricMap = this.bag.add(texLoader.load('textures/atrium/fabric-diffuse.webp'));
+    // a dark satin hardwood (Poly Haven, CC0) for the cabinets, the door, the bench and the lectern
+    const woodMap = this.bag.add(texLoader.load('textures/atrium/wood-diffuse.webp'));
+    const woodRough = this.bag.add(texLoader.load('textures/atrium/wood-rough.webp'));
+    // a beige marble with brown veins (ambientCG, CC0) for the walls and piers, in big slabs, kin to the floor
+    const beigeMap = this.bag.add(texLoader.load('textures/atrium/marble-beige-diffuse.webp'));
+    const beigeRough = this.bag.add(texLoader.load('textures/atrium/marble-beige-rough.webp'));
+    const beigeNormal = this.bag.add(texLoader.load('textures/atrium/marble-beige-normal.webp'));
+    for (const t of [marbleMap, marbleRough, woodMap, woodRough, beigeMap, beigeRough, beigeNormal, fabricMap]) {
       t.wrapS = t.wrapT = THREE.RepeatWrapping;
       t.anisotropy = 8;
     }
+    woodMap.colorSpace = THREE.SRGBColorSpace;
     marbleMap.colorSpace = THREE.SRGBColorSpace;
+    beigeMap.colorSpace = THREE.SRGBColorSpace;
+    fabricMap.colorSpace = THREE.SRGBColorSpace;
     const triplanar = (map: THREE.Texture, scale: number) => {
       const q = positionWorld.mul(scale);
       const n = normalWorld.abs();
       const w = n.div(n.x.add(n.y).add(n.z).add(0.0001));
       return texture(map, q.zy).rgb.mul(w.x).add(texture(map, q.xz).rgb.mul(w.y)).add(texture(map, q.xy).rgb.mul(w.z));
     };
-    // ashlar joints: courses of 0.9 m and blocks of 1.4 m along whichever way the wall runs
-    const alongWall = mix(positionWorld.x, positionWorld.z, normalWorld.abs().x);
-    const course = abs(fract(positionWorld.y.div(0.9)).sub(0.5)).negate().add(0.5).mul(0.9);
-    const block = abs(fract(alongWall.div(1.4).add(positionWorld.y.div(0.9).floor().mul(0.5))).sub(0.5)).negate().add(0.5).mul(1.4);
-    const ashlar = float(1).sub(smoothstep(0.006, 0.02, min(course, block)));
+    // the same projection with the axes swapped, so a grain that runs along the map runs upright
+    const triplanarUpright = (map: THREE.Texture, scale: number) => {
+      const q = positionWorld.mul(scale);
+      const n = normalWorld.abs();
+      const w = n.div(n.x.add(n.y).add(n.z).add(0.0001));
+      return texture(map, q.yz).rgb.mul(w.x).add(texture(map, q.zx).rgb.mul(w.y)).add(texture(map, q.yx).rgb.mul(w.z));
+    };
+    // the wear of old stone, shared by every stone material: the chamfers of the blocks carry a
+    // white vertex colour that the museum script painted, and where a patchy noise agrees the arris
+    // is chipped (paler, matte); soot gathers towards the floor; a slow mottle shifts the tone over
+    // metres; and a faint unevenness in the normals keeps every face from being a perfect plane
+    const wearNoise = smoothstep(0.5, 0.85, mx_noise_float(positionWorld.mul(23)).mul(0.5).add(0.5));
+    const worn = vertexColor().r.mul(wearNoise);
+    const soot = float(1).sub(smoothstep(1.4, 0.0, positionWorld.y).mul(mix(0.5, 1.0, grain)).mul(0.12));
+    const mottle = mix(0.93, 1.06, mx_noise_float(positionWorld.mul(0.23)).mul(0.5).add(0.5));
+    const wobble = vec3(mx_noise_float(positionWorld.mul(0.8)), mx_noise_float(positionWorld.mul(0.8).add(31.7)), mx_noise_float(positionWorld.mul(0.8).add(77.3))).mul(0.035);
+    const triplanarBump = (map: THREE.Texture, scale: number, strength: number) => {
+      const q = positionWorld.mul(scale);
+      const n = normalWorld.abs();
+      const w = n.div(n.x.add(n.y).add(n.z).add(0.0001));
+      const tx = texture(map, q.zy).rgb.mul(2).sub(1);
+      const ty = texture(map, q.xz).rgb.mul(2).sub(1);
+      const tz = texture(map, q.xy).rgb.mul(2).sub(1);
+      return vec3(0, tx.y, tx.x).mul(w.x).add(vec3(ty.x, 0, ty.y).mul(w.y)).add(vec3(tz.x, tz.y, 0).mul(w.z)).mul(strength);
+    };
+    const chipped = (base: ReturnType<typeof triplanar>) => mix(base, base.mul(0.7).add(0.3), worn);
     const stoneTex = triplanar(marbleMap, 1 / 1.5);
 
-    // cream stone with a little dirt in the grain; the mouldings a shade darker
-    const stone = std('stone', { roughness: 0.7 });
-    stone.colorNode = mix(stoneTex.mul(color('#f3e9d6')), color('#b8a98f'), ashlar.mul(0.55)).mul(mix(0.94, 1.04, grain));
-    stone.roughnessNode = mix(float(0.5), float(0.85), triplanar(marbleRough, 1 / 1.5).r);
-    const stoneDark = std('stone_dark', { roughness: 0.75 });
-    stoneDark.colorNode = stoneTex.mul(color('#d7c8ae')).mul(mix(0.92, 1.04, grain));
+    // the walls and piers: beige marble whose brown veins span metres, polished but not glassy
+    const stone = std('stone', { roughness: 0.5 });
+    stone.colorNode = chipped(triplanar(beigeMap, 1 / 5.5).mul(color('#dccbb6')).mul(mottle)).mul(soot);
+    stone.roughnessNode = mix(mix(float(0.34), float(0.62), triplanar(beigeRough, 1 / 5.5).r), float(0.85), worn);
+    stone.normalNode = transformNormalToView(normalWorld.add(triplanarBump(beigeNormal, 1 / 5.5, 0.5)).add(wobble).normalize());
+    // the mouldings, bases, capitals and courses: the cream marble, polished, a shade warmer and
+    // darker than the walls so the profiles read against them
+    const stoneDark = std('stone_dark', { roughness: 0.4 });
+    stoneDark.colorNode = chipped(triplanar(beigeMap, 1 / 2.2).mul(color('#c3ab8a')).mul(mix(0.95, 1.03, grain)).mul(mottle)).mul(soot);
+    stoneDark.roughnessNode = mix(mix(float(0.3), float(0.55), triplanar(beigeRough, 1 / 2.2).r), float(0.85), worn);
+    stoneDark.normalNode = transformNormalToView(normalWorld.add(wobble).normalize());
     const vault = std('vault', { roughness: 0.9 });
     const vaultTex = triplanar(marbleMap, 1 / 2.6);
     // the webs darken towards the crown, where the candlelight does not reach
@@ -251,10 +297,20 @@ export class AtriumScene implements WorldScene {
     std('gold', { color: '#d8b05a', roughness: 0.28, metalness: 1 });
     std('brass', { color: '#b08a45', roughness: 0.34, metalness: 1 });
     std('crimson', { color: '#7a1f2e', roughness: 0.85 });
-    std('wood', { color: '#3b2719', roughness: 0.55 });
-    std('velvet', { color: '#a1202f', roughness: 0.95 });
+    const wood = std('wood', { roughness: 0.5 });
+    wood.colorNode = triplanar(woodMap, 1 / 1.1).mul(color('#c9b39c'));
+    wood.roughnessNode = mix(float(0.3), float(0.65), triplanar(woodRough, 1 / 1.1).r);
+    const woodUpright = std('wood_v', { roughness: 0.5 });
+    woodUpright.colorNode = triplanarUpright(woodMap, 1 / 1.4).mul(color('#b89d84'));
+    woodUpright.roughnessNode = mix(float(0.35), float(0.7), triplanarUpright(woodRough, 1 / 1.4).r);
+    const woodFine = std('wood_fine', { roughness: 0.45 });
+    woodFine.colorNode = triplanar(woodMap, 1 / 0.45).mul(color('#c4ab90'));
+    woodFine.roughnessNode = mix(float(0.28), float(0.6), triplanar(woodRough, 1 / 0.45).r);
+    const velvet = std('velvet', { roughness: 0.95 });
+    velvet.colorNode = triplanar(fabricMap, 1 / 0.35).mul(color('#b8243a')).mul(1.1);
     const marble = std('marble', { roughness: 0.28 });
-    marble.colorNode = triplanar(marbleMap, 1 / 1.2).mul(color('#fbf7f0'));
+    marble.colorNode = chipped(triplanar(beigeMap, 1 / 1.6).mul(color('#e6d6c2')));
+    marble.roughnessNode = mix(float(0.28), float(0.8), worn);
     std('statue', { color: '#a6a39d', roughness: 0.72 });
     std('plinth', { color: '#2b211c', roughness: 0.75 });
     std('lead', { color: '#141418', roughness: 0.9 });
@@ -430,6 +486,11 @@ export class AtriumScene implements WorldScene {
       this.exhibits.push({ id: `project-${i}`, kind: 'project', index: i, spot: spot(`spot_canvas_${i}`), focus: centre(`canvas_${i}`) });
     }
     this.exhibits.push({ id: 'contact', kind: 'contact', index: 0, spot: spot('spot_contact'), focus: centre('contact_panel') });
+    const seat = root.getObjectByName('seat_bench');
+    if (seat) {
+      // the bench faces the nave: the visitor sits looking north (-z) and walks up from the front
+      this.seat = { x: seat.position.x, z: seat.position.z, heading: Math.PI, approachX: seat.position.x, approachZ: seat.position.z - 1.0 };
+    }
   }
 
   /** A stained-glass window painted on a canvas, sized to the opening, one of a few variants. */
@@ -565,12 +626,71 @@ export class AtriumScene implements WorldScene {
   private addCandles(root: THREE.Object3D): void {
     let count = 0;
     root.traverse((o) => {
+      if (o.name.startsWith('candle_sconce')) {
+        // the flames of a sconce sit a little in front of its halo empty and below it
+        const side = Math.sign(o.position.x);
+        this.sconceSpots.push(new THREE.Vector3(o.position.x - side * 0.12, o.position.y - 0.12, o.position.z));
+        return;
+      }
       if (!o.name.startsWith('candle_chandelier') || count >= 6) return;
       const light = new THREE.PointLight('#ffb561', 32, 20, 2);
       light.position.copy(o.position).add(new THREE.Vector3(0, -0.6, 0));
       this.scene.add(light);
       count++;
     });
+    // twenty-four sconces would be too many lights: eight follow the visitor, fading as they move
+    for (let i = 0; i < 8; i++) {
+      const light = new THREE.PointLight('#ffb561', 0, 9, 2);
+      this.scene.add(light);
+      this.sconceLights.push({ light, spot: -1, target: 0 });
+    }
+  }
+
+  /** The eight sconce lights take the eight nearest sconces, fading out before they move. */
+  private updateSconceLights(dt: number): void {
+    const from = this.character?.position;
+    if (!from || !this.sconceSpots.length) return;
+    const order = this.sconceSpots.map((p, i) => ({ i, d: Math.hypot(p.x - from.x, p.z - from.z) })).sort((a, b) => a.d - b.d);
+    const wanted = new Set(order.slice(0, this.sconceLights.length).map((o) => o.i));
+    const taken = new Set(this.sconceLights.map((s) => s.spot));
+    const free = order.slice(0, this.sconceLights.length).map((o) => o.i).filter((i) => !taken.has(i));
+    for (const entry of this.sconceLights) {
+      if (entry.spot >= 0 && !wanted.has(entry.spot)) entry.target = 0;
+      if (entry.target === 0 && entry.light.intensity < 0.05 && free.length) {
+        entry.spot = free.shift()!;
+        entry.light.position.copy(this.sconceSpots[entry.spot]);
+        entry.target = 9;
+      } else if (entry.spot >= 0 && wanted.has(entry.spot)) {
+        entry.target = 9;
+      }
+      entry.light.intensity += (entry.target - entry.light.intensity) * (1 - Math.exp(-dt * 3));
+    }
+  }
+
+  /** Walks to the bench and sits, or stands up again. */
+  toggleSit(): void {
+    const character = this.character;
+    const seat = this.seat;
+    if (!character || !seat) return;
+    if (character.isSeated) {
+      character.stand();
+      character.place(seat.approachX, seat.approachZ, seat.heading);
+      this.setSeatState('sit');
+      return;
+    }
+    if (this.seatState !== 'sit') return;
+    this.markMoved();
+    this.walkTo(new THREE.Vector3(seat.approachX, 0, seat.approachZ), () => {
+      character.sit(seat.x, seat.z, seat.heading);
+      this.yaw = seat.heading + Math.PI;
+      this.setSeatState('stand');
+    });
+  }
+
+  private setSeatState(state: SeatState): void {
+    if (state === this.seatState) return;
+    this.seatState = state;
+    this.onSeat?.(state);
   }
 
   /** Redraws every canvas texture, for example after a language change. */
@@ -784,7 +904,13 @@ export class AtriumScene implements WorldScene {
       run: this.keys.run || Math.hypot(this.stick.x, this.stick.y) > 0.92,
     };
     if (Math.abs(ahead) + Math.abs(side) > 0) this.markMoved();
+    if (character.isSeated && Math.hypot(input.x, input.z) > 0.05) this.toggleSit();
     character.update(dt, input);
+    if (this.seat && !character.isSeated) {
+      const near = Math.hypot(this.seat.approachX - character.position.x, this.seat.approachZ - character.position.z) < 2.2;
+      this.setSeatState(near ? 'sit' : 'none');
+    }
+    this.updateSconceLights(dt);
 
     // keep the camera behind the visitor while walking, unless the user turned it recently
     if (character.speed > 0.6 && elapsed - this.manualCameraAt > 1.6 && Math.abs(side) < 0.1) {

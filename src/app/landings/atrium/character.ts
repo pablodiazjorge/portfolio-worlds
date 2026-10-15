@@ -156,8 +156,53 @@ export class Character {
   }
 
   private targetHeading: number | null = null;
+  private seated = false;
+
+  get isSeated(): boolean {
+    return this.seated;
+  }
+
+  /** Sits on a seat point facing `heading`: the locomotion rests and the Sitting clip takes over. */
+  sit(x: number, z: number, heading: number): void {
+    this.cancelRoute();
+    this.gesture?.fadeOut(0.2);
+    this.gesture = null;
+    this.place(x, z, heading);
+    this.targetHeading = null;
+    this.lean.rotation.set(0, 0, 0);
+    this.seated = true;
+    const sitting = this.actions.get('Sitting');
+    if (sitting) {
+      sitting.reset();
+      sitting.setLoop(THREE.LoopRepeat, Infinity);
+      sitting.enabled = true;
+      sitting.setEffectiveTimeScale(1);
+      sitting.setEffectiveWeight(1);
+      sitting.fadeIn(0.4).play();
+    }
+    this.actions.get('Idle')?.fadeOut(0.4);
+  }
+
+  /** Gets up: the Sitting clip fades and the locomotion blends back in through animate(). */
+  stand(): void {
+    if (!this.seated) return;
+    this.seated = false;
+    this.actions.get('Sitting')?.fadeOut(0.35);
+    this.phase = 0;
+    const idle = this.actions.get('Idle');
+    if (idle) {
+      idle.enabled = true;
+      idle.play();
+    }
+  }
 
   update(dt: number, input: MoveInput): void {
+    if (this.seated) {
+      this.velocity.set(0, 0, 0);
+      this.speedValue = 0;
+      this.mixer.update(dt);
+      return;
+    }
     const manual = Math.hypot(input.x, input.z) > 0.05;
     if (manual && this.route.length) this.cancelRoute();
 
@@ -185,6 +230,13 @@ export class Character {
       }
     }
 
+    if (this.seated) {
+      // the arrival callback of a route may have sat the visitor down this very frame
+      this.velocity.set(0, 0, 0);
+      this.speedValue = 0;
+      this.mixer.update(dt);
+      return;
+    }
     const length = Math.hypot(dx, dz);
     if (length > 1) {
       dx /= length;
@@ -310,7 +362,11 @@ export class Character {
     if (walk) walk.time = (this.phase % 1) * walk.getClip().duration;
     if (runAction) runAction.time = (this.phase % 1) * runAction.getClip().duration;
     const gestureWeight = this.gesture ? this.gesture.getEffectiveWeight() : 0;
-    const base = 1 - gestureWeight * (1 - move);
+    // a sitting clip still fading out after standing keeps its share of the blend; an action that
+    // never played reports a weight of one, so only a running one counts
+    const sitting = this.actions.get('Sitting');
+    const sittingWeight = sitting && sitting.isRunning() ? sitting.getEffectiveWeight() : 0;
+    const base = (1 - gestureWeight * (1 - move)) * (1 - sittingWeight);
     idle?.setEffectiveWeight((1 - move) * base);
     walk?.setEffectiveWeight(move * (1 - gait) * base);
     runAction?.setEffectiveWeight(move * gait * base);

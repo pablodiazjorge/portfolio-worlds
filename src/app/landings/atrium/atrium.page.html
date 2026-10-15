@@ -98,6 +98,14 @@
   @if (hintVisible()) {
     <p class="hint">{{ touch() ? x.hintTouch : x.hint }}</p>
   }
+  @if (seatState() !== 'none') {
+    <button type="button" class="prompt" (click)="toggleSit()">
+      @if (!touch()) {
+        <kbd>E</kbd>
+      }
+      {{ seatState() === 'sit' ? x.sit : x.standUp }}
+    </button>
+  }
 
   <nav id="atrium-guide" class="guide" [class.is-open]="guideOpen()" [attr.aria-label]="x.guide">
     <section>

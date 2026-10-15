@@ -58,6 +58,8 @@ M = {
     "brass": pw.material("brass", "#a8823f", 0.35, 1.0),
     "crimson": pw.material("crimson", "#8c1f2f", 0.85),
     "wood": pw.material("wood", "#3a2619", 0.6),
+    "wood_v": pw.material("wood_v", "#3a2619", 0.6),  # the same oak with the grain running upright
+    "wood_fine": pw.material("wood_fine", "#3a2619", 0.6),  # the same oak at the scale of furniture
     "velvet": pw.material("velvet", "#9d1f2e", 0.9),
     "shadow_patch": pw.material("shadow_patch", "#000000", 0.9, alpha=0.5),
     "marble": pw.material("marble", "#f1ede6", 0.3),
@@ -121,15 +123,50 @@ def place_asset(asset, location, scale=1.0, yaw=0.0, name=None):
     return copies
 
 
+def wear_layer(bm):
+    """The vertex colour layer the scene reads as wear: black everywhere until a chamfer paints it."""
+    layer = bm.loops.layers.color.get("wear")
+    if layer is None:
+        layer = bm.loops.layers.color.new("wear")
+        for f in bm.faces:
+            for l in f.loops:
+                l[layer] = (0.0, 0.0, 0.0, 1.0)
+    return layer
+
+
 def obj(name, bm, mat, group, smooth=False):
+    wear_layer(bm)
     o = pw.bm_object(name, bm, M[mat] if isinstance(mat, str) else mat, smooth=smooth)
     o.parent = groups[group]
     return o
 
 
-def box(group, mat, x0, x1, y0, y1, z0, z1, name=None):
+def chamfer_edges(bm, width, segments=1, worn=True):
+    """Bevels every edge of a bmesh by `width`: a stone arris or a wooden edge that catches the light.
+    The new faces are painted white in the wear layer, so the scene can chip and dull them."""
+    if width > 0:
+        layer = wear_layer(bm)
+        res = bmesh.ops.bevel(bm, geom=bm.edges[:], offset=width, offset_type="OFFSET", segments=segments, profile=0.5, affect="EDGES", clamp_overlap=True)
+        for f in bm.faces:
+            for l in f.loops:
+                l[layer] = (0.0, 0.0, 0.0, 1.0)
+        if worn:
+            for f in res["faces"]:
+                for l in f.loops:
+                    l[layer] = (1.0, 1.0, 1.0, 1.0)
+
+
+def box(group, mat, x0, x1, y0, y1, z0, z1, name=None, chamfer=None):
+    """A block; its edges are chamfered by `chamfer`, or by up to 1.8 cm when the block is big enough,
+    because no real edge is perfectly sharp (colliders stay plain, nobody sees them)."""
     bm = bmesh.new()
-    pw.add_box(bm, ((x0 + x1) / 2, (y0 + y1) / 2, (z0 + z1) / 2), (abs(x1 - x0), abs(y1 - y0), abs(z1 - z0)))
+    size = (abs(x1 - x0), abs(y1 - y0), abs(z1 - z0))
+    pw.add_box(bm, ((x0 + x1) / 2, (y0 + y1) / 2, (z0 + z1) / 2), size)
+    if chamfer is None:
+        # the width wanders from block to block, as cut stone and old joinery do
+        n["i"] += 1
+        chamfer = 0.0 if mat == "collider" else min(0.012 + 0.014 * ((n["i"] * 7919) % 97) / 96, min(size) * 0.25)
+    chamfer_edges(bm, chamfer, worn=mat not in ("wood", "velvet", "case_glass", "panel_blue", "label", "lightbox", "paper", "canvas"))
     n["i"] += 1
     return obj(name or f"{group}_{n['i']}", bm, mat, group)
 
@@ -153,6 +190,80 @@ def prism(group, mat, centre, r, z0, z1, sides, name, phase=0.0):
     bmesh.ops.rotate(bm, verts=vs, cent=(0, 0, 0), matrix=Matrix.Rotation(phase, 3, "Z"))
     bmesh.ops.translate(bm, verts=vs, vec=Vector((centre[0], centre[1], z0)))
     return obj(name, bm, mat, group)
+
+
+def rect_ring(bm, x0, x1, y0, y1, inset, z):
+    return [bm.verts.new(Vector(p)) for p in ((x0 + inset, y0 + inset, z), (x1 - inset, y0 + inset, z), (x1 - inset, y1 - inset, z), (x0 + inset, y1 - inset, z))]
+
+
+def moulded_block(group, mat, x0, x1, y0, y1, z0, profile, name):
+    """A block whose section follows `profile`, pairs of (inset, height) from the bottom up: a moulding
+    run round the rectangle with mitred corners, for a base, a capital, a plinth or a cornice."""
+    bm = bmesh.new()
+    rings = [rect_ring(bm, x0, x1, y0, y1, inset, z0 + dz) for inset, dz in profile]
+    loft(bm, rings)
+    bm.faces.new(list(reversed(rings[0])))
+    bm.faces.new(rings[-1])
+    bmesh.ops.recalc_face_normals(bm, faces=bm.faces[:])
+    return obj(name, bm, mat, group)
+
+
+def moulded_run(group, mat, axis, at, out, u0, u1, z0, profile, name):
+    """A moulding along a wall face: `profile` is pairs of (projection, height) from the bottom up,
+    starting and ending on the face, the projection measured out of the face (the plane `axis` =
+    `at`) towards `out` (+1 or -1); the run spans u0..u1 sideways and is capped at both ends."""
+    bm = bmesh.new()
+
+    def pt(u, proj, dz):
+        return Vector((at + out * proj, u, z0 + dz)) if axis == "x" else Vector((u, at + out * proj, z0 + dz))
+
+    rings = [[bm.verts.new(pt(u, proj, dz)) for proj, dz in profile] for u in (u0, u1)]
+    loft(bm, rings)
+    caps = [bm.faces.new(list(reversed(rings[0]))), bm.faces.new(rings[1])]
+    bmesh.ops.triangulate(bm, faces=caps)
+    bmesh.ops.recalc_face_normals(bm, faces=bm.faces[:])
+    return obj(name, bm, mat, group)
+
+
+def lathe(group, mat, centre, profile, seg, name, smooth=True):
+    """A body of revolution about the vertical through `centre` (x, y): `profile` is pairs of
+    (radius, z) from the bottom up, for the base and the capital of a shaft or a baluster."""
+    bm = bmesh.new()
+    rings = [[bm.verts.new(Vector((centre[0] + r * math.cos(a), centre[1] + r * math.sin(a), z))) for a in (k / seg * math.tau for k in range(seg))] for r, z in profile]
+    loft(bm, rings)
+    bm.faces.new(list(reversed(rings[0])))
+    bm.faces.new(rings[-1])
+    bmesh.ops.recalc_face_normals(bm, faces=bm.faces[:])
+    return obj(name, bm, mat, group, smooth=smooth)
+
+
+def scaled(profile, s):
+    return [(a * s, b * s) for a, b in profile]
+
+
+# the profiles, in metres: (inset or projection, height) from the bottom up
+# the attic base of the Gothic piers: a chamfered plinth, a torus, a hollow and a smaller torus
+BASE_PROFILE = [(0.0, 0.0), (0.0, 0.30), (0.05, 0.36), (0.03, 0.40), (0.06, 0.45), (0.09, 0.50), (0.09, 0.54), (0.05, 0.58), (0.06, 0.63)]
+# a capital: the neck, a bell that flares out, a fillet, then the chamfered abacus
+CAPITAL_PROFILE = [(0.17, 0.0), (0.17, 0.05), (0.14, 0.12), (0.09, 0.20), (0.04, 0.27), (0.03, 0.31), (0.06, 0.33), (0.0, 0.40), (0.0, 0.66)]
+COLUMN_CAPITAL_PROFILE = [(0.22, 0.0), (0.22, 0.04), (0.17, 0.10), (0.10, 0.18), (0.04, 0.25), (0.03, 0.29), (0.06, 0.31), (0.0, 0.37), (0.0, 0.55)]
+# the wall mouldings: a plinth course with a chamfered top, a string course with a roll under a
+# weathering, a cornice with a hollow under a bold projection, a window sill with a slope
+PLINTH_PROFILE = [(0.0, 0.0), (0.14, 0.0), (0.14, 0.34), (0.10, 0.40), (0.10, 0.46), (0.05, 0.52), (0.0, 0.52)]
+STRING_PROFILE = [(0.0, 0.0), (0.07, 0.02), (0.12, 0.07), (0.12, 0.12), (0.06, 0.15), (0.06, 0.19), (0.10, 0.22), (0.0, 0.30)]
+CORNICE_PROFILE = [(0.0, 0.0), (0.10, 0.04), (0.14, 0.10), (0.14, 0.16), (0.08, 0.22), (0.08, 0.27), (0.20, 0.35), (0.30, 0.42), (0.30, 0.46), (0.0, 0.46)]
+SILL_PROFILE = [(0.0, 0.0), (0.18, 0.0), (0.18, 0.06), (0.10, 0.10), (0.04, 0.18), (0.0, 0.20)]
+# a baluster: a square foot, a neck, a belly, a slimmer neck and a square cap, 0.85 m tall
+BALUSTER_PROFILE = [(0.12, 0.0), (0.12, 0.05), (0.07, 0.09), (0.07, 0.20), (0.14, 0.33), (0.16, 0.42), (0.13, 0.52), (0.08, 0.63), (0.07, 0.75), (0.10, 0.80), (0.10, 0.85)]
+# the section of a vault rib: a roll with a keel, in units of its radius, the keel at -b
+KEEL = [(0.0, -1.3), (0.72, -0.9), (1.0, -0.25), (0.95, 0.55), (0.0, 0.95), (-0.95, 0.55), (-1.0, -0.25), (-0.72, -0.9)]
+
+
+def shaft(group, x, y, z0, z1, r, name, seg=10):
+    """A shaft with a moulded base and a bell capital, both a shade darker than the shaft."""
+    lathe(group, "stone_dark", (x, y), [(1.55 * r, z0), (1.6 * r, z0 + 0.04), (1.25 * r, z0 + 0.09), (r, z0 + 0.13)], seg, name + "_base")
+    cyl(group, "stone", (x, y, z0 + 0.13), (x, y, z1 - 0.22), r, seg=seg, name=name)
+    lathe(group, "stone_dark", (x, y), [(r, z1 - 0.22), (1.15 * r, z1 - 0.14), (1.5 * r, z1 - 0.05), (1.6 * r, z1)], seg, name + "_cap")
 
 
 def quad(name, mat, centre, width, height, facing, group="exhibits", tilt=0.0, yaw=0.0):
@@ -199,12 +310,14 @@ def opening(hw, z_bottom, z_spring, z_apex, steps=14):
     return [(u, z) for u, z in arch(hw, z_spring, z_apex, steps)] + [(hw, z_bottom), (-hw, z_bottom)]
 
 
-def pierced_wall(name, mat, group, axis, at, u0, u1, z0, z1, hole, thickness=T):
+def pierced_wall(name, mat, group, axis, at, u0, u1, z0, z1, hole, thickness=T, splay=0.0, splay_face=1):
     """A slab of wall in the plane `axis` = `at` ('y' for a wall across X, 'x' for a wall along
     Y), spanning u0..u1 sideways and z0..z1 up, with a hole whose outline is `hole`, a list of
     (u, z) points in order. The slab's faces are the ring between the hole and the rectangle:
     every hole point is sent out from the hole's own centre to the rectangle's edge, and the
-    rectangle's corners are stitched in wherever two neighbouring rays land on different edges."""
+    rectangle's corners are stitched in wherever two neighbouring rays land on different edges.
+    With `splay`, the hole opens out by that much on the face `splay_face` (+1 the back, -1 the
+    front), every point moving away from the middle of the sill, so the reveal is a splayed jamb."""
     bm = bmesh.new()
     hc_u = (min(u for u, _ in hole) + max(u for u, _ in hole)) / 2
     hc_z = (min(z for _, z in hole) + max(z for _, z in hole)) / 2
@@ -235,8 +348,17 @@ def pierced_wall(name, mat, group, axis, at, u0, u1, z0, z1, hole, thickness=T):
 
     m = len(hole)
     rims = [rim(u, z) for u, z in hole]
-    front_in = [bm.verts.new(place(u, z, -thickness / 2)) for u, z in hole]
-    back_in = [bm.verts.new(place(u, z, thickness / 2)) for u, z in hole]
+    z_low = min(z for _, z in hole)
+
+    def splayed(u, z):
+        du, dz = u - hc_u, z - z_low
+        d = math.hypot(du, dz) or 1.0
+        return (u + du / d * splay, z + dz / d * splay)
+
+    front_hole = [splayed(u, z) if splay and splay_face < 0 else (u, z) for u, z in hole]
+    back_hole = [splayed(u, z) if splay and splay_face > 0 else (u, z) for u, z in hole]
+    front_in = [bm.verts.new(place(u, z, -thickness / 2)) for u, z in front_hole]
+    back_in = [bm.verts.new(place(u, z, thickness / 2)) for u, z in back_hole]
     front_out = [bm.verts.new(place(u, z, -thickness / 2)) for u, z in rims]
     back_out = [bm.verts.new(place(u, z, thickness / 2)) for u, z in rims]
     for i in range(m):
@@ -270,11 +392,15 @@ def loft(bm, rings, close=False, closed=True):
             bm.faces.new((a[i], a[j], b[j], b[i]))
 
 
-def tube(bm, points, radius, sides=8):
+def tube(bm, points, radius, sides=8, section=None, keel=None):
     """A round tube through a polyline of Vectors; the section's frame is carried along the curve
-    (parallel transport) so it never flips halfway, as it did with a fixed up vector."""
+    (parallel transport) so it never flips halfway, as it did with a fixed up vector. `section`
+    replaces the circle by a list of (a, b) offsets in units of the radius, and `keel` is the way
+    the section's -b side should face at the start (a rib's keel hangs towards the room)."""
     rings = []
     a = None
+    shape = section or [(math.cos(s / sides * math.tau), math.sin(s / sides * math.tau)) for s in range(sides)]
+    sides = len(shape)
     for k, p in enumerate(points):
         prev = points[max(k - 1, 0)]
         nxt = points[min(k + 1, len(points) - 1)]
@@ -288,12 +414,15 @@ def tube(bm, points, radius, sides=8):
                 a = t.cross(Vector((0, 0, 1)) if abs(t.z) < 0.9 else Vector((1, 0, 0)))
             a.normalize()
         b = t.cross(a).normalized()
-        rings.append([bm.verts.new(p + (a * math.cos(s / sides * math.tau) + b * math.sin(s / sides * math.tau)) * radius) for s in range(sides)])
+        if k == 0 and keel is not None and (-b).dot(keel) < 0:
+            a, b = -a, -b
+        rings.append([bm.verts.new(p + (a * sa + b * sb) * radius) for sa, sb in shape])
     for ring_a, ring_b in zip(rings, rings[1:]):
         for s in range(sides):
             bm.faces.new((ring_a[s], ring_a[(s + 1) % sides], ring_b[(s + 1) % sides], ring_b[s]))
     bm.faces.new(list(reversed(rings[0])))
     bm.faces.new(rings[-1])
+    bmesh.ops.recalc_face_normals(bm, faces=bm.faces[:])
 
 
 def inset(points, d, z_spring):
@@ -363,8 +492,13 @@ for side in (-1, 1):
         # the lower wall is solid and carries the collision; the upper part, pierced, is decor
         box("solid", "stone", min(x_in, x_out), max(x_in, x_out), b0, b1, 0, SILL, f"wall_{side}_{k}_low")
         hole = [(yc + u * (1 if side < 0 else -1), z) for u, z in arch(WHW, SPRING, WAPEX, 12)] + [(yc + WHW * (1 if side < 0 else -1), SILL), (yc - WHW * (1 if side < 0 else -1), SILL)]
-        pierced_wall(f"wall_{side}_{k}", "stone", "decor", "x", side * (HW + T / 2), b0, b1, SILL - 0.3, WALL, hole)
-        box("decor", "stone_dark", min(x_in - side * 0.12, x_out), max(x_in - side * 0.12, x_out), yc - WHW - 0.25, yc + WHW + 0.25, SILL - 0.14, SILL + 0.06, f"sill_{side}_{k}")
+        pierced_wall(f"wall_{side}_{k}", "stone", "decor", "x", side * (HW + T / 2), b0, b1, SILL - 0.3, WALL, hole, splay=0.25, splay_face=-side)
+        # a sloping sill on the nave face and a hood mould round the arch, dropped to label stops
+        moulded_run("decor", "stone_dark", "x", x_in, -side, yc - WHW - 0.4, yc + WHW + 0.4, SILL - 0.16, SILL_PROFILE, f"sill_{side}_{k}")
+        bm = bmesh.new()
+        hood = [Vector((x_in - side * 0.05, yc + u, z)) for u, z in arch(WHW + 0.42, SPRING, WAPEX + 0.44, 12)]
+        tube(bm, [Vector((x_in - side * 0.05, yc - WHW - 0.42, SPRING - 0.3))] + hood + [Vector((x_in - side * 0.05, yc + WHW + 0.42, SPRING - 0.3))], 0.07, sides=6)
+        obj(f"hood_{side}_{k}", bm, "stone_dark", "decor")
         stained_window(f"window_{side}_{k}", "x", side * (HW + T / 2), yc, WHW, SILL, SPRING, WAPEX, facing, depth=side * 0.14)
         pw.empty(f"window_{side}_{k}_at", (x_in, yc, (SILL + WAPEX) / 2))
         if k in PAINTING_BAYS:
@@ -378,31 +512,54 @@ for side in (-1, 1):
         yb = Y0 + k * BAY
         xp = x_in - side * PIER_D / 2
         box("solid", "stone", min(x_in, x_in - side * PIER_D), max(x_in, x_in - side * PIER_D), yb - PIER_W / 2, yb + PIER_W / 2, 0, WALL - 0.6, f"pier_{side}_{k}")
+        # the shafts stand on moulded bases and end in bell capitals under the pier's own capital
         for dy in (-0.3, 0.0, 0.3):
-            cyl("decor", "stone", (x_in - side * (PIER_D + 0.1), yb + dy, 0.6), (x_in - side * (PIER_D + 0.1), yb + dy, WALL - 0.6), 0.13, seg=10, name=f"shaft_{side}_{k}_{dy}")
-        # the bases of the end piers stop at the wall faces, so nothing pokes through into the aisles
-        box("decor", "stone_dark", min(x_in, x_in - side * (PIER_D + 0.3)), max(x_in, x_in - side * (PIER_D + 0.3)), max(yb - 0.55, Y0), min(yb + 0.55, Y_ARCH - 0.45), 0, 0.6, f"pier_base_{side}_{k}")
-        box("decor", "stone_dark", min(x_in, x_in - side * (PIER_D + 0.32)), max(x_in, x_in - side * (PIER_D + 0.32)), yb - 0.56, yb + 0.56, WALL - 0.6, WALL - 0.34, f"capital_{side}_{k}")
-        box("decor", "gold", min(x_in, x_in - side * (PIER_D + 0.34)), max(x_in, x_in - side * (PIER_D + 0.34)), yb - 0.58, yb + 0.58, WALL - 0.62, WALL - 0.56, f"capital_fillet_{side}_{k}")
-        box("decor", "stone_dark", min(x_in, x_in - side * (PIER_D + 0.38)), max(x_in, x_in - side * (PIER_D + 0.38)), yb - 0.62, yb + 0.62, WALL - 0.34, WALL, f"abacus_{side}_{k}")
-    # a cornice along the top of the wall and a plinth course along the bottom
-    box("decor", "stone_dark", min(x_in - side * 0.3, x_out), max(x_in - side * 0.3, x_out), Y0, Y_ARCH - 0.45, WALL - 0.3, WALL, f"cornice_{side}")
-    box("decor", "stone_dark", min(x_in - side * 0.1, x_out), max(x_in - side * 0.1, x_out), Y0, Y_ARCH - 0.45, 0, 0.5, f"plinth_course_{side}")
-    # a string course under the windows, between the panels and the sills
-    box("decor", "stone_dark", min(x_in - side * 0.1, x_out), max(x_in - side * 0.1, x_out), Y0, Y_ARCH - 0.45, SILL - 0.3, SILL - 0.14, f"string_{side}")
+            if Y0 <= yb + dy <= Y_ARCH - 0.45:
+                shaft("decor", x_in - side * (PIER_D + 0.1), yb + dy, 0.63, WALL - 0.66, 0.13, f"shaft_{side}_{k}_{dy}")
+        # an attic base (the bases of the end piers stop at the wall faces, so nothing pokes through
+        # into the aisles) and a capital with a bell, a gilt fillet and a chamfered abacus
+        moulded_block("decor", "stone_dark", min(x_in, x_in - side * (PIER_D + 0.3)), max(x_in, x_in - side * (PIER_D + 0.3)), max(yb - 0.55, Y0), min(yb + 0.55, Y_ARCH - 0.45), 0, BASE_PROFILE, f"pier_base_{side}_{k}")
+        moulded_block("decor", "stone_dark", min(x_in, x_in - side * (PIER_D + 0.38)), max(x_in, x_in - side * (PIER_D + 0.38)), max(yb - 0.62, Y0), min(yb + 0.62, Y_ARCH - 0.45), WALL - 0.66, CAPITAL_PROFILE, f"capital_{side}_{k}")
+        moulded_block("decor", "gold", min(x_in, x_in - side * (PIER_D + 0.36)), max(x_in, x_in - side * (PIER_D + 0.36)), max(yb - 0.6, Y0), min(yb + 0.6, Y_ARCH - 0.45), WALL - 0.35, [(0.0, 0.0), (0.0, 0.03)], f"capital_fillet_{side}_{k}")
+    # a cornice along the top of the wall, a plinth course along the bottom and a string course
+    # under the windows, all run as profiles out of the wall face
+    moulded_run("decor", "stone_dark", "x", x_in, -side, Y0, Y_ARCH - 0.45, WALL - 0.46, CORNICE_PROFILE, f"cornice_{side}")
+    moulded_run("decor", "stone_dark", "x", x_in, -side, Y0, Y_ARCH - 0.45, 0, PLINTH_PROFILE, f"plinth_course_{side}")
+    moulded_run("decor", "stone_dark", "x", x_in, -side, Y0, Y_ARCH - 0.45, SILL - 0.36, STRING_PROFILE, f"string_{side}")
 
 # the entrance wall: a tall doorway with a dark wooden door, a great window above it
 DOOR_HW, DOOR_Z = 1.6, 4.4
 EW_HW, EW_SILL, EW_SPRING, EW_APEX = 2.3, 8.0, 12.6, 15.4
 pierced_wall("wall_entrance_low", "stone", "decor", "y", Y0 - T / 2, -HW - T, HW + T, -0.2, EW_SILL - 0.3, opening(DOOR_HW, 0.0, DOOR_Z, DOOR_Z + 2.0, 10))
-pierced_wall("wall_entrance_high", "stone", "decor", "y", Y0 - T / 2, -HW - T, HW + T, EW_SILL - 0.3, APEX + 0.5, opening(EW_HW, EW_SILL, EW_SPRING, EW_APEX, 12))
+pierced_wall("wall_entrance_high", "stone", "decor", "y", Y0 - T / 2, -HW - T, HW + T, EW_SILL - 0.3, APEX + 0.5, opening(EW_HW, EW_SILL, EW_SPRING, EW_APEX, 12), splay=0.3, splay_face=1)
 stained_window("window_entrance", "y", Y0 - T / 2, 0.0, EW_HW, EW_SILL, EW_SPRING, EW_APEX, "n", depth=-0.12)
 pw.empty("window_entrance_at", (0, Y0, (EW_SILL + EW_APEX) / 2))
+# the plinth course carries on round the entrance wall up to the door jambs
+for (u0, u1) in ((-HW, -DOOR_HW - 0.5), (DOOR_HW + 0.5, HW)):
+    moulded_run("decor", "stone_dark", "y", Y0, 1, u0, u1, 0, PLINTH_PROFILE, f"plinth_course_entrance_{u0:.0f}")
 box("solid", "collider", -HW - T, -DOOR_HW, Y0 - T, Y0, 0, WALL, "entrance_l")
 box("solid", "collider", DOOR_HW, HW + T, Y0 - T, Y0, 0, WALL, "entrance_r")
-box("solid", "wood", -DOOR_HW, DOOR_HW, Y0 - T / 2 - 0.1, Y0 - T / 2 + 0.1, 0, DOOR_Z + 2.0, "door")
-for k in range(5):
-    box("decor", "iron", -DOOR_HW + 0.1, DOOR_HW - 0.1, Y0 - T / 2 + 0.1, Y0 - T / 2 + 0.14, 0.8 + k * 1.0, 0.86 + k * 1.0, f"door_band_{k}")
+# the door: two leaves of upright oak planks on a dark backing, each with three strap hinges that
+# end in a fleur and carry a row of studs, a meeting rail of iron between them and a ring handle
+DOOR_Y = Y0 - T / 2  # the plane of the door, in the middle of the wall
+box("solid", "wood_v", -DOOR_HW, DOOR_HW, DOOR_Y - 0.08, DOOR_Y + 0.02, 0, DOOR_Z + 2.0, "door", chamfer=0.0)
+PLANK = (2 * DOOR_HW - 0.04) / 12
+for k in range(12):
+    px0 = -DOOR_HW + 0.02 + k * PLANK
+    box("decor", "wood_v", px0 + 0.006, px0 + PLANK - 0.006, DOOR_Y + 0.02, DOOR_Y + 0.06, 0.04, DOOR_Z + 2.0, f"door_plank_{k}", chamfer=0.006)
+box("decor", "iron", -0.05, 0.05, DOOR_Y + 0.06, DOOR_Y + 0.085, 0.0, DOOR_Z + 2.0, "door_meeting_rail")
+for sx in (-1, 1):
+    for k, zb in enumerate((0.9, 2.5, 4.0)):
+        x_out, x_in = sx * (DOOR_HW - 0.04), sx * (DOOR_HW - 1.15)
+        box("decor", "iron", min(x_out, x_in), max(x_out, x_in), DOOR_Y + 0.06, DOOR_Y + 0.085, zb - 0.045, zb + 0.045, f"door_strap_{sx}_{k}")
+        box("decor", "iron", min(x_in, x_in - sx * 0.14), max(x_in, x_in - sx * 0.14), DOOR_Y + 0.06, DOOR_Y + 0.085, zb - 0.1, zb + 0.1, f"door_fleur_{sx}_{k}")
+        for s in range(5):
+            xs = x_out - sx * (0.12 + s * 0.24)
+            box("decor", "iron", xs - 0.022, xs + 0.022, DOOR_Y + 0.085, DOOR_Y + 0.105, zb - 0.022, zb + 0.022, f"door_stud_{sx}_{k}_{s}", chamfer=0.006)
+    bm = bmesh.new()
+    tube(bm, [Vector((sx * 0.3 + 0.1 * math.cos(a), DOOR_Y + 0.12, 1.1 + 0.1 * math.sin(a))) for a in (i / 16 * math.tau for i in range(17))], 0.014, sides=6)
+    obj(f"door_ring_{sx}", bm, "brass", "decor")
+    box("decor", "brass", sx * 0.3 - 0.05, sx * 0.3 + 0.05, DOOR_Y + 0.085, DOOR_Y + 0.11, 1.15, 1.25, f"door_ring_plate_{sx}")
 for sx in (-1, 1):
     box("decor", "stone_dark", sx * (DOOR_HW + 0.05), sx * (DOOR_HW + 0.45), Y0 - T / 2 - 0.2, Y0, 0, DOOR_Z + 0.3, f"door_jamb_{sx}")
 for step, (dr, depth) in enumerate(((0.0, 0.0), (0.26, 0.16))):
@@ -418,18 +575,18 @@ pierced_wall("wall_arch", "stone", "decor", "y", Y_ARCH, -HW - T, HW + T, -0.2, 
 box("solid", "collider", -HW - T, -ARCH_HW, Y_ARCH - 0.45, Y_ARCH + 0.45, 0, WALL, "arch_l")
 box("solid", "collider", ARCH_HW, HW + T, Y_ARCH - 0.45, Y_ARCH + 0.45, 0, WALL, "arch_r")
 # archivolts: two stepped mouldings following the arch on the hall side
-for step, (dr, depth) in enumerate(((0.0, 0.0), (0.32, 0.18))):
+for step, (dr, depth, r) in enumerate(((0.0, 0.0, 0.12), (0.32, 0.18, 0.12), (0.62, 0.06, 0.08))):
     bm = bmesh.new()
     pts = [Vector((u, Y_ARCH - 0.45 - depth, z)) for u, z in arch(ARCH_HW + dr + 0.12, ARCH_SPRING, ARCH_APEX + dr * 1.1, 14)]
-    tube(bm, [Vector((-ARCH_HW - dr - 0.12, Y_ARCH - 0.45 - depth, 0.0))] + pts + [Vector((ARCH_HW + dr + 0.12, Y_ARCH - 0.45 - depth, 0.0))], 0.12, sides=6)
+    tube(bm, [Vector((-ARCH_HW - dr - 0.12, Y_ARCH - 0.45 - depth, 0.0))] + pts + [Vector((ARCH_HW + dr + 0.12, Y_ARCH - 0.45 - depth, 0.0))], r, sides=8)
     obj(f"archivolt_{step}", bm, "stone_dark", "decor")
 # the balcony: a slab over the arch and a stout stone balustrade, a sign on its face
 box("decor", "stone", -HW, HW, Y_ARCH - 1.6, Y_ARCH + 0.45, BALC_Z - 0.4, BALC_Z, "balcony_slab")
 box("decor", "stone_dark", -HW, HW, Y_ARCH - 1.78, Y_ARCH - 1.6, BALC_Z - 0.55, BALC_Z, "balcony_edge")
 for i in range(22):
     xb = -HW + 0.4 + i * (2 * HW - 0.8) / 21
-    cyl("decor", "marble", (xb, Y_ARCH - 1.45, BALC_Z + 0.1), (xb, Y_ARCH - 1.45, BALC_Z + 0.95), 0.09, seg=8, name=f"baluster_{i}")
-    cyl("decor", "marble", (xb, Y_ARCH - 1.45, BALC_Z + 0.35), (xb, Y_ARCH - 1.45, BALC_Z + 0.65), 0.15, seg=8, name=f"baluster_belly_{i}")
+    lean = ((i * 37) % 11 - 5) * 0.004
+    lathe("decor", "marble", (xb, Y_ARCH - 1.45), [(r * (1 + lean), BALC_Z + 0.1 + z) for r, z in BALUSTER_PROFILE], 10, f"baluster_{i}")
 box("decor", "marble", -HW, HW, Y_ARCH - 1.62, Y_ARCH - 1.28, BALC_Z + 0.95, BALC_Z + 1.15, "balcony_rail")
 box("decor", "marble", -HW, HW, Y_ARCH - 1.62, Y_ARCH - 1.28, BALC_Z, BALC_Z + 0.1, "balcony_rail_low")
 quad("sign_hall", "label", (0, Y_ARCH - 1.79, BALC_Z - 0.3), 2.4, 0.5, "s")
@@ -439,6 +596,9 @@ pierced_wall("wall_gallery", "stone", "decor", "y", Y_ARCH, -HW - T, HW + T, BAL
 stained_window("window_gallery", "y", Y_ARCH, 0.0, GW_HW, GW_SILL, GW_SPRING, GW_APEX, "s", depth=-0.1)
 stained_window("window_gallery_back", "y", Y_ARCH, 0.0, GW_HW, GW_SILL, GW_SPRING, GW_APEX, "n", depth=0.1)
 pw.empty("window_gallery_at", (0, Y_ARCH, (GW_SILL + GW_APEX) / 2))
+# the plinth course runs along the hall face of the arch wall, either side of the arch
+for (u0, u1) in ((-HW, -ARCH_HW - 0.95), (ARCH_HW + 0.95, HW)):
+    moulded_run("decor", "stone_dark", "y", Y_ARCH - 0.45, -1, u0, u1, 0, PLINTH_PROFILE, f"plinth_course_arch_{u0:.0f}")
 # the hall face of the arch wall keeps only its banners: the stone stays bare between them
 
 # --- the second room: a narrower nave between arcades, side aisles behind them ------------------
@@ -454,7 +614,8 @@ for side in (-1, 1):
         hole = [(yc + u * sgn, z) for u, z in arch(AR_HW, AR_SPRING, AR_APEX, 12)] + [(yc + AR_HW * sgn, 0.0), (yc - AR_HW * sgn, 0.0)]
         pierced_wall(f"arcade_{side}_{k}", "stone", "decor", "x", x_arc, b0, b1, -0.2, CL_SILL - 0.3, hole)
         hole = [(yc + u * sgn, z) for u, z in arch(CL_HW, CL_SPRING, CL_APEX, 10)] + [(yc + CL_HW * sgn, CL_SILL), (yc - CL_HW * sgn, CL_SILL)]
-        pierced_wall(f"clerestory_{side}_{k}", "stone", "decor", "x", x_arc, b0, b1, CL_SILL - 0.3, WALL2, hole)
+        pierced_wall(f"clerestory_{side}_{k}", "stone", "decor", "x", x_arc, b0, b1, CL_SILL - 0.3, WALL2, hole, splay=0.2, splay_face=-side)
+        moulded_run("decor", "stone_dark", "x", x_arc - side * T / 2, -side, yc - CL_HW - 0.35, yc + CL_HW + 0.35, CL_SILL - 0.14, scaled(SILL_PROFILE, 0.8), f"sill2_{side}_{k}")
         stained_window(f"window2_{side}_{k}", "x", x_arc, yc, CL_HW, CL_SILL, CL_SPRING, CL_APEX, "e" if side < 0 else "w", depth=side * 0.14)
         pw.empty(f"window2_{side}_{k}_at", (x_arc, yc, (CL_SILL + CL_APEX) / 2))
         # sconces on the arcade piers at the painting height of the main hall
@@ -462,19 +623,18 @@ for side in (-1, 1):
         yb = Y_ARCH + k * BAY
         box("solid", "collider", x_arc - 0.35, x_arc + 0.35, yb - 0.42, yb + 0.42, 0, AISLE_Z, f"arcade_pier_{side}_{k}")
         # a clustered pier: a square core with four shafts, a base and a stone capital with a gilt fillet
-        box("decor", "stone", x_arc - 0.3, x_arc + 0.3, yb - 0.3, yb + 0.3, 0.5, AR_SPRING - 0.4, f"column_{side}_{k}")
+        box("decor", "stone", x_arc - 0.3, x_arc + 0.3, yb - 0.3, yb + 0.3, 0.63, AR_SPRING - 0.5, f"column_{side}_{k}", chamfer=0.07)
         for sx, sy in ((-0.3, 0), (0.3, 0), (0, -0.3), (0, 0.3)):
-            cyl("decor", "stone", (x_arc + sx, yb + sy, 0.5), (x_arc + sx, yb + sy, AR_SPRING - 0.4), 0.11, seg=10, name=f"column_shaft_{side}_{k}_{sx}_{sy}")
-        box("decor", "stone_dark", x_arc - 0.5, x_arc + 0.5, yb - 0.5, yb + 0.5, 0, 0.5, f"column_base_{side}_{k}")
-        box("decor", "stone_dark", x_arc - 0.46, x_arc + 0.46, yb - 0.46, yb + 0.46, AR_SPRING - 0.4, AR_SPRING - 0.2, f"column_capital_{side}_{k}")
-        box("decor", "gold", x_arc - 0.47, x_arc + 0.47, yb - 0.47, yb + 0.47, AR_SPRING - 0.42, AR_SPRING - 0.37, f"column_fillet_{side}_{k}")
-        box("decor", "stone_dark", x_arc - 0.52, x_arc + 0.52, yb - 0.52, yb + 0.52, AR_SPRING - 0.2, AR_SPRING + 0.05, f"column_abacus_{side}_{k}")
+            shaft("decor", x_arc + sx, yb + sy, 0.63, AR_SPRING - 0.5, 0.11, f"column_shaft_{side}_{k}_{sx}_{sy}")
+        moulded_block("decor", "stone_dark", x_arc - 0.5, x_arc + 0.5, yb - 0.5, yb + 0.5, 0, BASE_PROFILE, f"column_base_{side}_{k}")
+        moulded_block("decor", "stone_dark", x_arc - 0.52, x_arc + 0.52, yb - 0.52, yb + 0.52, AR_SPRING - 0.5, COLUMN_CAPITAL_PROFILE, f"column_capital_{side}_{k}")
+        moulded_block("decor", "gold", x_arc - 0.5, x_arc + 0.5, yb - 0.5, yb + 0.5, AR_SPRING - 0.21, [(0.0, 0.0), (0.0, 0.03)], f"column_fillet_{side}_{k}")
         # a transverse arch across the aisle at every bay line, under the aisle ceiling
         # the vault's responds above the arcade
         box("decor", "stone", min(x_arc, x_arc - side * 0.3), max(x_arc, x_arc - side * 0.3), yb - 0.4, yb + 0.4, AR_APEX + 0.6, WALL2 - 0.5, f"respond_{side}_{k}")
         box("decor", "gold", min(x_arc, x_arc - side * 0.34), max(x_arc, x_arc - side * 0.34), yb - 0.46, yb + 0.46, WALL2 - 0.5, WALL2 - 0.3, f"respond_capital_{side}_{k}")
-    box("decor", "stone_dark", min(x_arc - side * 0.25, x_arc + side * T / 2), max(x_arc - side * 0.25, x_arc + side * T / 2), Y_ARCH, Y1, WALL2 - 0.3, WALL2, f"cornice2_{side}")
-    box("decor", "stone_dark", min(x_arc - side * 0.25, x_arc + side * T / 2), max(x_arc - side * 0.25, x_arc + side * T / 2), Y_ARCH, Y1, AR_APEX + 0.3, AR_APEX + 0.6, f"string2_{side}")
+    moulded_run("decor", "stone_dark", "x", x_arc - side * T / 2, -side, Y_ARCH, Y1, WALL2 - 0.4, scaled(CORNICE_PROFILE, 0.85), f"cornice2_{side}")
+    moulded_run("decor", "stone_dark", "x", x_arc - side * T / 2, -side, Y_ARCH, Y1, AR_APEX + 0.3, STRING_PROFILE, f"string2_{side}")
     # the aisle: an outer wall with a two-light window per bay, a cream ceiling, the end walls
     AW_HW, AW_SILL, AW_SPRING, AW_APEX = 1.1, 2.4, 5.4, 7.3
     for k, (b0, b1) in enumerate(bays2):
@@ -482,19 +642,22 @@ for side in (-1, 1):
         sgn = 1 if side < 0 else -1
         box("solid", "stone", min(x_outer, x_outer + side * T), max(x_outer, x_outer + side * T), b0, b1, 0, AW_SILL, f"aisle_wall_{side}_{k}_low")
         hole = [(yc + u * sgn, z) for u, z in arch(AW_HW, AW_SPRING, AW_APEX, 10)] + [(yc + AW_HW * sgn, AW_SILL), (yc - AW_HW * sgn, AW_SILL)]
-        pierced_wall(f"aisle_wall_{side}_{k}", "stone", "decor", "x", x_outer + side * T / 2, b0, b1, AW_SILL - 0.3, AISLE_Z, hole)
+        pierced_wall(f"aisle_wall_{side}_{k}", "stone", "decor", "x", x_outer + side * T / 2, b0, b1, AW_SILL - 0.3, AISLE_Z, hole, splay=0.2, splay_face=-side)
+        moulded_run("decor", "stone_dark", "x", x_outer, -side, yc - AW_HW - 0.35, yc + AW_HW + 0.35, AW_SILL - 0.14, scaled(SILL_PROFILE, 0.8), f"sill3_{side}_{k}")
         stained_window(f"window3_{side}_{k}", "x", x_outer + side * T / 2, yc, AW_HW, AW_SILL, AW_SPRING, AW_APEX, "e" if side < 0 else "w", depth=side * 0.14)
         pw.empty(f"window3_{side}_{k}_at", (x_outer, yc, (AW_SILL + AW_APEX) / 2))
+    moulded_run("decor", "stone_dark", "x", x_outer, -side, Y_ARCH + 0.45, Y1 - T / 2, 0, scaled(PLINTH_PROFILE, 0.8), f"plinth_course3_{side}")
     box("solid", "stone", min(x_arc, x_outer + side * T), max(x_arc, x_outer + side * T), Y1 - T / 2, Y1 + T / 2, 0, AISLE_Z + 0.4, f"aisle_end_{side}")
     box("solid", "stone", min(side * (HW + T), x_outer + side * T), max(side * (HW + T), x_outer + side * T), Y_ARCH - 0.45, Y_ARCH + 0.45, 0, AISLE_Z + 0.4, f"aisle_start_{side}")
     box("decor", "stone", min(x_arc, side * (HW + T)), max(x_arc, side * (HW + T)), Y_ARCH + 0.05, Y_ARCH + 0.45, AISLE_Z + 0.4, WALL2, f"aisle_start_high_{side}")
 
 # the far wall of the second room: the featured painting under a tall bright window
 FW_HW, FW_SILL, FW_SPRING, FW_APEX = 2.2, 6.4, 11.8, 14.8
-pierced_wall("wall_far", "stone", "decor", "y", Y1, -HW2 - T, HW2 + T, -0.2, APEX2 + 0.5, opening(FW_HW, FW_SILL, FW_SPRING, FW_APEX, 12))
+pierced_wall("wall_far", "stone", "decor", "y", Y1, -HW2 - T, HW2 + T, -0.2, APEX2 + 0.5, opening(FW_HW, FW_SILL, FW_SPRING, FW_APEX, 12), splay=0.3, splay_face=-1)
 box("solid", "collider", -HW2 - T, HW2 + T, Y1 - T / 2, Y1 + T / 2, 0, WALL2, "far_low")
 stained_window("window_far", "y", Y1, 0.0, FW_HW, FW_SILL, FW_SPRING, FW_APEX, "s", depth=0.14)
 pw.empty("window_far_at", (0, Y1, (FW_SILL + FW_APEX) / 2))
+moulded_run("decor", "stone_dark", "y", Y1 - T / 2, -1, -HW2, HW2, 0, PLINTH_PROFILE, "plinth_course_far")
 box("decor", "stone_dark", -2.7, 2.7, Y1 - T / 2 - 0.14, Y1 - T / 2, PANEL_Z0 - 0.22, PANEL_Z1 + 0.6, "far_moulding")
 box("decor", "panel_blue", -2.48, 2.48, Y1 - T / 2 - 0.17, Y1 - T / 2 - 0.14, PANEL_Z0, PANEL_Z1 + 0.38, "far_panel")
 paintings.append(("s", 0.0, Y1 - T / 2 - 0.17, 1.4))
@@ -514,21 +677,24 @@ def vault(name, hw, z_spring, z_apex, ya, yb, bays_, ridge_r, x0=0.0, steps=16, 
     diag_section = [Vector((p.x + x0, 0, p.z)) for p in inset([(u - x0, z) for u, z in section], 0.04, z_spring)]
     for (b0, b1) in bays_:
         bm = bmesh.new()
-        tube(bm, [Vector((p.x, b0, p.z)) for p in rib_section], 0.2, sides=6)
+        tube(bm, [Vector((p.x, b0, p.z)) for p in rib_section], 0.2, section=KEEL, keel=Vector((1, 0, 0)))
         obj(f"{name}_rib_{b0}", bm, "rib", "decor")
         for (y_from, y_to) in ((b0, b1), (b1, b0)):
             bm = bmesh.new()
             pts = [Vector((p.x, y_from + (y_to - y_from) * i / (len(diag_section) - 1), p.z)) for i, p in enumerate(diag_section)]
-            tube(bm, pts, 0.14, sides=5)
+            tube(bm, pts, 0.14, section=KEEL, keel=Vector((1, 0, 0)))
             obj(f"{name}_diag_{b0}_{y_from}", bm, "rib", "decor")
         bm = bmesh.new()
         pw.add_ico(bm, (x0, (b0 + b1) / 2, z_apex - 0.2), 0.3 if hw > 3 else 0.16, 1)
         obj(f"{name}_boss_{b0}", bm, "gold", "decor", smooth=True)
+        bm = bmesh.new()
+        pw.add_ico(bm, (x0, b0, z_apex - 0.16), 0.2 if hw > 3 else 0.12, 1)
+        obj(f"{name}_boss_rib_{b0}", bm, "gold", "decor", smooth=True)
     bm = bmesh.new()
-    tube(bm, [Vector((p.x, bays_[-1][1], p.z)) for p in rib_section], 0.2, sides=6)
+    tube(bm, [Vector((p.x, bays_[-1][1], p.z)) for p in rib_section], 0.2, section=KEEL, keel=Vector((1, 0, 0)))
     obj(f"{name}_rib_end", bm, "rib", "decor")
     bm = bmesh.new()
-    tube(bm, [Vector((x0, yy, z_apex - 0.08)) for yy in (ya, yb)], ridge_r, sides=6)
+    tube(bm, [Vector((x0, yy, z_apex - 0.08)) for yy in (ya, yb)], ridge_r, section=KEEL, keel=Vector((0, 0, -1)))
     obj(f"{name}_ridge", bm, "rib", "decor")
 
 
@@ -622,7 +788,8 @@ def sconce(side, yc, name, x=None, z=3.3, plate=0.11):
         # behind `x`) and its candles to the nave, with three flames where its candles end (measured
         # on the mesh); the empty puts the scene's halo on the shafts just behind the plate
         sc = 1.25
-        xp = x + side * plate
+        xp = x + side * plate - side * 0.07
+        box("decor", "stone", min(x + side * plate + side * 0.06, xp), max(x + side * plate + side * 0.06, xp), yc - 0.42, yc + 0.42, z + 0.05 - 0.66, z + 0.05 + 0.7, f"{name}_board", chamfer=0.02)
         place_asset("trellis/sconce", (xp, yc, z + 0.05), scale=sc, yaw=-side * math.pi / 2, name=name)
         for k, (dy, dz, dd) in enumerate(((-0.21 * sc, 0.23 * sc, 0.075 * sc), (0.0, 0.18 * sc, 0.12 * sc), (0.21 * sc, 0.23 * sc, 0.075 * sc))):
             xf = xp - side * dd
@@ -856,8 +1023,9 @@ for i, cx, cy, reader in layout:
 
     # the cabinet: dark wood on a stone base, with recessed panels and a brass lip
     box("solid", "collider", *rect(-0.9, 0.9, -0.6, 0.6), 0, top, f"case_collider_{i}")
-    box("decor", "stone_dark", *rect(-0.9, 0.9, -0.6, 0.6), 0, 0.12, f"case_base_{i}")
-    box("decor", "wood", *rect(-0.85, 0.85, -0.55, 0.55), 0.12, 0.92, f"case_body_{i}")
+    moulded_block("decor", "stone_dark", *rect(-0.9, 0.9, -0.6, 0.6), 0, [(0.0, 0.0), (0.0, 0.08), (0.03, 0.12)], f"case_base_{i}")
+    box("decor", "wood", *rect(-0.85, 0.85, -0.55, 0.55), 0.12, 0.84, f"case_body_{i}")
+    moulded_block("decor", "wood", *rect(-0.9, 0.9, -0.6, 0.6), 0.84, [(0.05, 0.0), (0.05, 0.02), (0.02, 0.05), (0.0, 0.08)], f"case_cornice_{i}")
     for sv in (-1, 1):
         for (u0, u1) in ((-0.78, -0.1), (0.1, 0.78)):
             box("decor", "wood", *rect(u0, u1, sv * 0.55, sv * 0.58), 0.22, 0.82, f"case_panel_{i}_{sv}_{u0:.1f}")
@@ -899,8 +1067,10 @@ for i, cx, cy, reader in layout:
 # --- the bench and the lectern ---------------------------------------------------------------------
 # the bench on the open floor to the left of the entrance, across the nave, with open trapezoid legs
 BX0, BX1, BY0, BY1 = -4.4, -2.0, -15.9, -15.2
-box("decor", "wood", BX0, BX1, BY0, BY1, 0.4, 0.48, "bench")
-box("decor", "velvet", BX0 + 0.05, BX1 - 0.05, BY0 + 0.05, BY1 - 0.05, 0.48, 0.6, "bench_cushion")
+box("decor", "wood_fine", BX0, BX1, BY0, BY1, 0.4, 0.48, "bench")
+box("decor", "velvet", BX0 + 0.05, BX1 - 0.05, BY0 + 0.05, BY1 - 0.05, 0.48, 0.56, "bench_cushion", chamfer=0.03)
+# where the visitor sits: hips over the back of the cushion, facing the nave
+pw.empty("seat_bench", ((BX0 + BX1) / 2, BY0 + 0.28, 0.56))
 for sx in (BX0 + 0.3, BX1 - 0.3):
     bm = bmesh.new()
     verts_low = [bm.verts.new(Vector((sx + tx * 0.22, y_, 0.0))) for tx, y_ in ((-1, BY0 - 0.15), (1, BY0 - 0.15), (1, BY1 + 0.15), (-1, BY1 + 0.15))]
@@ -909,23 +1079,31 @@ for sx in (BX0 + 0.3, BX1 - 0.3):
     bm.faces.new(list(reversed(verts_low)))
     bm.faces.new(verts_top)
     bmesh.ops.recalc_face_normals(bm, faces=bm.faces[:])
-    obj(f"bench_leg_{sx:.1f}", bm, "wood", "decor")
+    obj(f"bench_leg_{sx:.1f}", bm, "wood_fine", "decor")
 box("solid", "collider", BX0 - 0.1, BX1 + 0.1, BY0 - 0.2, BY1 + 0.2, 0, 0.5, "bench_collider")
 
 LX, LY = 0.0, -15.6
-box("solid", "wood", LX - 0.3, LX + 0.3, LY - 0.3, LY + 0.3, 0, 0.1, "lectern")
-box("decor", "wood", LX - 0.3, LX + 0.3, LY - 0.3, LY + 0.3, 0, 0.12, "lectern_base")
-cyl("decor", "wood", (LX, LY, 0.12), (LX, LY, 1.0), 0.09, seg=10, name="lectern_column")
+box("solid", "collider", LX - 0.3, LX + 0.3, LY - 0.3, LY + 0.3, 0, 0.1, "lectern")
+moulded_block("decor", "wood_fine", LX - 0.32, LX + 0.32, LY - 0.32, LY + 0.32, 0, [(0.0, 0.0), (0.0, 0.06), (0.04, 0.1), (0.06, 0.12)], "lectern_base")
+lathe("decor", "wood_fine", (LX, LY), [(0.16, 0.12), (0.16, 0.15), (0.09, 0.2), (0.07, 0.4), (0.1, 0.55), (0.07, 0.7), (0.065, 0.88), (0.11, 0.95), (0.13, 1.0)], 12, "lectern_column")
 bm = bmesh.new()
 vs = pw.add_box(bm, (0, 0, 0), (0.9, 0.62, 0.06), 0.0)
-bmesh.ops.rotate(bm, verts=vs, cent=(0, 0, 0), matrix=Matrix.Rotation(math.radians(-22), 3, "X"))
-bmesh.ops.translate(bm, verts=vs, vec=Vector((LX, LY, 1.1)))
-obj("lectern_top", bm, "wood", "decor")
+chamfer_edges(bm, 0.012)
+bmesh.ops.rotate(bm, verts=bm.verts[:], cent=(0, 0, 0), matrix=Matrix.Rotation(math.radians(-22), 3, "X"))
+bmesh.ops.translate(bm, verts=bm.verts[:], vec=Vector((LX, LY, 1.1)))
+obj("lectern_top", bm, "wood_fine", "decor")
+bm = bmesh.new()
+vs = pw.add_box(bm, (0, 0.29, 0.055), (0.86, 0.04, 0.05), 0.0)
+chamfer_edges(bm, 0.008)
+bmesh.ops.rotate(bm, verts=bm.verts[:], cent=(0, 0, 0), matrix=Matrix.Rotation(math.radians(-22), 3, "X"))
+bmesh.ops.translate(bm, verts=bm.verts[:], vec=Vector((LX, LY, 1.1)))
+obj("lectern_ledge", bm, "wood_fine", "decor")
 quad("contact_panel", "label", (LX, LY, 1.135), 0.8, 0.5, "up", group="exhibits", tilt=math.radians(22), yaw=math.pi)
 pw.empty("spot_contact", (LX, LY + 1.4, 0))
 box("decor", "brass", LX - 0.36, LX + 0.36, LY - 0.33, LY - 0.3, 0.72, 0.98, "lectern_sign_back")
 quad("sign_contact", "label", (LX, LY - 0.335, 0.85), 0.7, 0.24, "s")
-pw.empty("spawn", (1.5, -6.0, 0))
+# the visitor starts in front of the statue, where the about plaque is read
+pw.empty("spawn", (PX, PY - 3.4, 0))
 
 for template in _asset_templates:
     bpy.data.objects.remove(template, do_unlink=True)

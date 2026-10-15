@@ -3,7 +3,7 @@ import { injectWorldScene } from '../../core/engine/inject-world-scene';
 import { isTouchDevice } from '../../core/engine/device';
 import { Site } from '../../core/site.service';
 import { Joystick, StickVector } from '../../shared/joystick/joystick';
-import type { Exhibit } from './atrium.scene';
+import type { Exhibit, SeatState } from './atrium.scene';
 import type { MuseumCopy } from './museum-textures';
 
 const MOVE_KEYS: Record<string, [number, number]> = {
@@ -39,6 +39,7 @@ export class AtriumPage {
   protected readonly guideOpen = signal(false);
   protected readonly hintVisible = signal(true);
   protected readonly exhibit = signal<Exhibit | null>(null);
+  protected readonly seatState = signal<SeatState>('none');
   protected readonly pointerOverExhibit = signal(false);
 
   /** Experience from the oldest job, on the first lightbox, to the newest. */
@@ -60,6 +61,7 @@ export class AtriumPage {
     const { AtriumScene } = await import('./atrium.scene');
     const scene = new AtriumScene(ctx, untracked(this.copy));
     scene.onExhibit = (exhibit) => this.exhibit.set(exhibit);
+    scene.onSeat = (state) => this.seatState.set(state);
     scene.onFirstMove = () => this.hintVisible.set(false);
     return scene;
   });
@@ -85,6 +87,10 @@ export class AtriumPage {
     this.scene()?.goTo(id);
   }
 
+  protected toggleSit(): void {
+    this.scene()?.toggleSit();
+  }
+
   protected onStick(vector: StickVector): void {
     this.scene()?.setStick(vector.x, vector.y);
   }
@@ -97,6 +103,10 @@ export class AtriumPage {
     }
     if (event.code === 'KeyG') {
       this.toggleGuide();
+      return;
+    }
+    if (event.code === 'KeyE') {
+      this.toggleSit();
       return;
     }
     if (!(event.code in MOVE_KEYS) && event.key !== 'Shift') return;
