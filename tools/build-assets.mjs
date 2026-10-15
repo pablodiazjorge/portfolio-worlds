@@ -58,7 +58,9 @@ const ASSETS = [
     name: 'helios-station',
     script: 'helios_station.py',
     out: 'public/models/helios/station.glb',
-    budgetKB: 900,
+    budgetKB: 18000,
+    textureSize: 4096,
+    sharpenGenerated: true,
     keepNodes: true,
   },
   {
@@ -143,6 +145,17 @@ for (const asset of selected) {
   // Empty nodes are camera anchors and markers read by the scenes, and some UVs only receive
   // textures at runtime (the TERRA monitors), so both survive pruning.
   transforms.push(weld(), prune({ keepLeaves: true, keepAttributes: true }));
+  if (asset.sharpenGenerated) {
+    // the colour maps TRELLIS.2 bakes come back soft: an unsharp mask on the generated materials' base colour
+    for (const material of document.getRoot().listMaterials()) {
+      if (!material.getName().endsWith('_tex')) continue;
+      const tex = material.getBaseColorTexture();
+      const image = tex?.getImage();
+      if (!tex || !image) continue;
+      tex.setImage(new Uint8Array(await sharp(Buffer.from(image)).sharpen({ sigma: 1.0, m1: 1.0, m2: 2.0 }).jpeg({ quality: 92 }).toBuffer()));
+      tex.setMimeType('image/jpeg');
+    }
+  }
   if (document.getRoot().listTextures().length > 0) {
     transforms.push(textureCompress({ encoder: sharp, targetFormat: 'webp', resize: [asset.textureSize ?? 1024, asset.textureSize ?? 1024] }));
   }

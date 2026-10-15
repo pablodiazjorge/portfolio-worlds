@@ -12,6 +12,7 @@ import math
 import os
 import sys
 
+import bmesh
 import bpy
 from mathutils import Vector
 
@@ -23,12 +24,13 @@ parser.add_argument("--faces", type=int, default=40000)
 parser.add_argument("--yaw", type=float, default=0.0, help="degrees, applied before measuring")
 parser.add_argument("--height", type=float, default=2.9, help="metres from the feet to the top of the head")
 parser.add_argument("--width", type=float, default=None, help="metres across, instead of a height")
-parser.add_argument("--anchor", choices=("bottom", "top", "back"), default="bottom", help="where the origin goes: the feet, the top (a banner on its rod) or the back face (a wall sconce)")
+parser.add_argument("--anchor", choices=("bottom", "top", "back", "centre"), default="bottom", help="where the origin goes: the feet, the top (a banner on its rod), the back face (a wall sconce) or the centre of the bounds (a spacecraft)")
 parser.add_argument("--material", default="statue_tex", help="name of the single material, which the scene recognises by its _tex suffix")
 parser.add_argument("--report", action="store_true", help="only print the bounds and face count")
 parser.add_argument("--sink", type=float, default=0.03, help="metres the feet bite into the ground, so the figure does not hover")
 parser.add_argument("--texture", type=int, default=1024, help="longest side the baked textures are shrunk to")
-parser.add_argument("--keep-mr", action="store_true", help="keep the baked metallic-roughness map too (at most 1K), for props with metal in them")
+parser.add_argument("--keep-mr", action="store_true", help="keep the baked metallic-roughness map too (at most 2K), for props with metal in them")
+parser.add_argument("--cut-below", type=float, default=None, help="fraction of the height (0..1) under which geometry is removed before anchoring, to drop a landing gear or a stand the picture showed")
 parser.add_argument("--hang", type=float, default=None, help="for a banner: hang the cloth straight under its rod and keep this fraction of the depth of whatever stands off it, so a modelled emblem becomes a relief")
 args = parser.parse_args(argv)
 
@@ -47,6 +49,8 @@ if len(meshes) > 1:
     bpy.ops.object.join()
 statue = bpy.context.view_layer.objects.active
 bpy.ops.object.transform_apply(location=True, rotation=True, scale=True)
+# the glTF importer leaves the object in quaternion mode, where an Euler yaw would be ignored
+statue.rotation_mode = "XYZ"
 statue.rotation_euler = (0, 0, math.radians(args.yaw))
 bpy.ops.object.transform_apply(rotation=True)
 
@@ -59,6 +63,23 @@ images = sorted({(n.image.name, tuple(n.image.size)) for m in statue.data.materi
 print("[statue] images", images)
 if args.report:
     raise SystemExit(0)
+
+if args.cut_below is not None:
+    # everything under the cut line goes: the landing gear hanging under a spacecraft, a stand
+    z_cut = lo.z + args.cut_below * size.z
+    bm = bmesh.new()
+    bm.from_mesh(statue.data)
+    doomed = [v for v in bm.verts if (statue.matrix_world @ v.co).z < z_cut]
+    bmesh.ops.delete(bm, geom=doomed, context="VERTS")
+    bm.to_mesh(statue.data)
+    bm.free()
+    statue.data.update()
+    bpy.context.view_layer.update()
+    corners = [statue.matrix_world @ Vector(c) for c in statue.bound_box]
+    lo = Vector((min(c.x for c in corners), min(c.y for c in corners), min(c.z for c in corners)))
+    hi = Vector((max(c.x for c in corners), max(c.y for c in corners), max(c.z for c in corners)))
+    size = hi - lo
+    print(f"[statue] cut {len(doomed)} verts below z {z_cut:.3f}; bounds now {size.x:.2f} x {size.y:.2f} x {size.z:.2f} m")
 
 # scale so the figure stands `height` tall (or `width` across), hang a banner straight, then set
 # the origin at the anchor
@@ -98,6 +119,8 @@ if args.anchor == "top":
     statue.location = Vector((-(lo.x + hi.x) / 2, -(lo.y + hi.y) / 2, -hi.z))
 elif args.anchor == "back":
     statue.location = Vector((-(lo.x + hi.x) / 2, -hi.y, -(lo.z + hi.z) / 2))
+elif args.anchor == "centre":
+    statue.location = Vector((-(lo.x + hi.x) / 2, -(lo.y + hi.y) / 2, -(lo.z + hi.z) / 2))
 else:
     statue.location = Vector((-(lo.x + hi.x) / 2, -(lo.y + hi.y) / 2, -lo.z - args.sink))
 bpy.ops.object.transform_apply(location=True)
@@ -143,7 +166,7 @@ for m in statue.data.materials:
             tree.nodes.remove(n)
     for n in tree.nodes:
         if n.type == "TEX_IMAGE" and n.image:
-            limit = min(args.texture, 1024) if n in mr else args.texture
+            limit = min(args.texture, 2048) if n in mr else args.texture
             if max(n.image.size) > limit:
                 n.image.scale(limit, limit)
 

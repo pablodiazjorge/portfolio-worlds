@@ -24,7 +24,8 @@ export class HeliosPage {
     return new HeliosScene(ctx);
   });
 
-  private readonly director = injectScrollDirector(this.scene);
+  // every stop is one gesture away, as in ATLAS; only the project list scrolls freely
+  private readonly director = injectScrollDirector(this.scene, { stepped: true });
 
   constructor() {
     const formats = {
