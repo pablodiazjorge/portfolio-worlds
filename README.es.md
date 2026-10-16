@@ -46,7 +46,7 @@ npm run assets         # regenera todos los modelos 3D (necesita Blender 4.5)
 npm run assets -- atlas --skip-blender   # vuelve a optimizar un modelo desde su exportación
 ```
 
-`?webgl` fuerza el backend WebGL 2 y `?quality=low|medium|high` sustituye la detección del dispositivo, útil para probar.
+`?webgl` fuerza el backend WebGL 2 y `?quality=low|medium|high` sustituye la detección del dispositivo, útil para probar. El nivel sale de la memoria, los núcleos y el táctil, acotado por lo que resulte ser la GPU (las integradas se quedan en medium y los renderizadores por software en low); la página lo indica en `data-quality` en el elemento `<html>`.
 
 ## Pipeline de modelos 3D
 

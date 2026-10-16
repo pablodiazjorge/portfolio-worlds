@@ -136,7 +136,7 @@ export class AtriumScene implements WorldScene {
     this.scene.add(new THREE.HemisphereLight('#a9b4cc', '#3a2a1e', 0.12));
     this.sun.position.set(-9, 14, 4);
     this.sun.castShadow = ctx.quality !== 'low';
-    this.sun.shadow.mapSize.set(2048, 2048);
+    this.sun.shadow.mapSize.set(ctx.quality === 'high' ? 2048 : 1024, ctx.quality === 'high' ? 2048 : 1024);
     const cam = this.sun.shadow.camera;
     cam.left = -16;
     cam.right = 16;
@@ -353,7 +353,7 @@ export class AtriumScene implements WorldScene {
       floor.colorNode = stoneFloor;
     } else {
       // the polish: the hall mirrored in the marble, dimmer on the inlay
-      const mirror = reflector({ resolutionScale: this.ctx.quality === 'high' ? 0.35 : 0.25 });
+      const mirror = reflector({ resolutionScale: this.ctx.quality === 'high' ? 0.35 : 0.2 });
       mirror.target.rotateX(-Math.PI / 2);
       mirror.target.position.y = 0.002;
       this.scene.add(mirror.target);
@@ -638,15 +638,15 @@ export class AtriumScene implements WorldScene {
       this.scene.add(light);
       count++;
     });
-    // twenty-four sconces would be too many lights: eight follow the visitor, fading as they move
-    for (let i = 0; i < 8; i++) {
+    // twenty-four sconces would be too many lights: eight follow the visitor (six on a lighter tier), fading as they move
+    for (let i = 0; i < (this.ctx.quality === 'high' ? 8 : 6); i++) {
       const light = new THREE.PointLight('#ffb561', 0, 9, 2);
       this.scene.add(light);
       this.sconceLights.push({ light, spot: -1, target: 0 });
     }
   }
 
-  /** The eight sconce lights take the eight nearest sconces, fading out before they move. */
+  /** The sconce lights take the nearest sconces, fading out before they move. */
   private updateSconceLights(dt: number): void {
     const from = this.character?.position;
     if (!from || !this.sconceSpots.length) return;

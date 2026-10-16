@@ -46,7 +46,7 @@ npm run assets         # rebuild every 3D model (needs Blender 4.5)
 npm run assets -- atlas --skip-blender   # re-optimize one model from its raw export
 ```
 
-`?webgl` forces the WebGL 2 backend and `?quality=low|medium|high` overrides the device tier, which is handy for testing.
+`?webgl` forces the WebGL 2 backend and `?quality=low|medium|high` overrides the device tier, which is handy for testing. The tier comes from memory, cores and touch, capped by what the GPU turns out to be (integrated parts stop at medium, software renderers at low); the page reports it in `data-quality` on the `<html>` element.
 
 ## 3D asset pipeline
 

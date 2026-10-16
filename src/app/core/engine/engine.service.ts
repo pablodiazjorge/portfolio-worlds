@@ -1,7 +1,7 @@
 import { Injectable, isDevMode, signal } from '@angular/core';
 import type { Timer } from 'three/webgpu';
 import { AdaptiveDpr } from './adaptive-dpr';
-import { detectQuality, isTouchDevice, prefersReducedMotion } from './device';
+import { detectQuality, forcedQuality, gpuTier, isTouchDevice, lowerQuality, prefersReducedMotion, readGpu } from './device';
 import { Backend, EngineContext, Quality, WorldScene, WorldSceneFactory } from './world-scene';
 
 export interface SceneHandle {
@@ -160,7 +160,6 @@ export class Engine {
 
     const THREE = await import('three/webgpu');
     const forceWebGL = new URLSearchParams(location.search).has('webgl');
-    const quality = detectQuality();
     const renderer = new THREE.WebGPURenderer({
       canvas,
       antialias: true,
@@ -174,6 +173,9 @@ export class Engine {
       : 'webgl2';
     this.backend.set(backend);
     document.documentElement.dataset['backend'] = backend;
+    // the device heuristic, capped by what the GPU turns out to be, unless the page forced a tier
+    const quality = forcedQuality() ?? lowerQuality(detectQuality(), gpuTier(readGpu(renderer)));
+    document.documentElement.dataset['quality'] = quality;
 
     renderer.outputColorSpace = THREE.SRGBColorSpace;
     renderer.shadowMap.enabled = true;
