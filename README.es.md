@@ -82,6 +82,10 @@ Los scripts también se pueden usar de forma interactiva con [Blender MCP](https
 
 Importa el repositorio como proyecto nuevo. `vercel.json` define el comando de compilación, la carpeta de salida, la caché inmutable de los archivos con hash y algunas cabeceras de seguridad, así que no hace falta tocar nada en el panel. Si el sitio no va a vivir en `https://worlds.pablodiazjorge.com`, cambia `SITE_ORIGIN` en `src/app/core/site.service.ts` para que las URL canónicas y de Open Graph apunten al dominio correcto.
 
+## Licencia
+
+El código (la aplicación Angular, las escenas, los guiones de Blender y la cadena de activos) se publica bajo la [licencia MIT](LICENSE). El contenido propio del portfolio no: los textos de mi perfil, experiencia y proyectos, las portadas de los proyectos y las imágenes del hub y de enlace son personales y no se ceden para su reutilización. Los activos de terceros y los generados conservan sus propias condiciones, recogidas en los créditos de más abajo y en los README que acompañan a cada uno: los de Poly Haven y ambientCG son CC0, las imágenes de la NASA son de dominio público y las mallas generadas con TRELLIS.2 no están a la venta.
+
 ## Créditos
 
 - Texturas: Marble 01 y Blue Metal Plate de Rob Tuytel y Dark Wood de Dario Barresi, Dimitrios Savva y Rico Cilliers (Poly Haven, CC0); Marble 014 y Fabric 061 (ambientCG, CC0). Modelo: Television 02 de Benny Weimer (Poly Haven, CC0).

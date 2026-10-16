@@ -82,6 +82,10 @@ The scripts also work interactively through [Blender MCP](https://github.com/ahu
 
 Import the repository as a new project. `vercel.json` sets the build command, the output directory, immutable caching for hashed files and a few security headers, so no settings are needed in the dashboard. If the site lives somewhere other than `https://worlds.pablodiazjorge.com`, change `SITE_ORIGIN` in `src/app/core/site.service.ts` so canonical and Open Graph URLs point to the right host.
 
+## Licence
+
+The code (the Angular application, the scenes, the Blender scripts and the asset pipeline) is released under the [MIT License](LICENSE). The portfolio's own content is not: the texts of my profile, experience and projects, the project covers and the hub and link images are personal and not licensed for reuse. The third-party and generated assets keep their own terms, listed in the credits below and in the READMEs next to each of them: the Poly Haven and ambientCG assets are CC0, the NASA imagery is public domain, and the meshes generated with TRELLIS.2 are not for sale.
+
 ## Credits
 
 - Textures: Marble 01 and Blue Metal Plate by Rob Tuytel and Dark Wood by Dario Barresi, Dimitrios Savva and Rico Cilliers (Poly Haven, CC0); Marble 014 and Fabric 061 (ambientCG, CC0). Model: Television 02 by Benny Weimer (Poly Haven, CC0).
