@@ -17,5 +17,5 @@ CC0 (https://polyhaven.com/license), converted from the 1K JPEGs to WebP. The sc
 its luminance and tints it white, so only the panel seams and the wear of the paint remain, and samples the
 three maps triplanar in the station's own frame in plates of 2 m, so the panels turn with the wheel. It was
 chosen among five CC0 candidates (a weathered white painted steel, two sci-fi octagon platings and a scratched
-white plastic from ambientCG, besides this one) on comparison sheets kept in
-`_docs-internal/process/helios/2026-10-16-texturas-casco-*.jpg`.
+white plastic from ambientCG, besides this one) on comparison sheets of the same stops, kept in my
+internal notes outside the repository.

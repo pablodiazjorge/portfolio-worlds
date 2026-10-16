@@ -2,21 +2,35 @@
 
 [Versión en español](README.es.md)
 
-The portfolio of Pablo Díaz-Jorge told four ways. Every world holds the same content (about, experience, projects and contact) and walks you through it with a different 3D scene, rendered with three.js on WebGPU and falling back to WebGL 2 where WebGPU is not available.
+My portfolio, told four ways. Every world holds the same content (about, experience, projects and contact) and walks you through it with a different 3D scene, rendered with three.js on WebGPU and falling back to WebGL 2 where WebGPU is not available.
 
 | Key | World | How you move through it |
 | --- | --- | --- |
 | 1 | Atlas | Scroll flies the camera up an alpine route at dawn; one camp per job, projects from the ridge, contact at the summit observatory. |
-| 2 | Aeris | A drone in a product studio comes apart into five layers, one per job, each linked to its text by a callout line. |
-| 3 | Helios | A shuttle leaves a procedural planet, flies through one gate per job and docks at a space station, with live telemetry. |
-| 4 | Atrium | A museum you walk through with a robot: paintings are projects, lit panels are jobs, and a gallery guide walks you to any piece. |
+| 2 | Aeris | A holographic cargo drone crosses a dark studio from stop to stop, one per job, carrying on a chain the monitor where it all began. |
+| 3 | Helios | A shuttle leaves the Earth, drawn from NASA imagery, passes one navigation buoy per job and docks at a space station, with live telemetry. |
+| 4 | Atrium | A museum you walk through with a robot: the paintings are projects, the glass cases hold the jobs, the statue tells about me and the lectern by the entrance is the contact; a gallery guide walks you to any piece. |
 
 Keys 1 to 4 switch worlds from anywhere and 0 returns to the hub. Every page exists in English (`/atlas`) and Spanish (`/es/atlas`), prerendered with its own title, description, Open Graph image and hreflang links.
 
+## A snapshot, not the living portfolio
+
+This site is a technical experiment, not the portfolio I keep up to date. It freezes my profile as of October 2026 and will not follow it from here; the current version lives at [pablodiazjorge.com](https://www.pablodiazjorge.com/). I built it to test, on a real deliverable, a way of working: WebGPU and TSL in production, an asset pipeline that runs Blender from scripts and, above all, development with AI coding agents under my direction, mixing local generation models with hosted ones, MCP servers and the practices that make that work reviewable. The result stands as it is, with the state of the tools and of my experience at that date.
+
+## How it was built
+
+The site was developed end to end with AI coding agents (Claude Code) under my direction. I chose the concepts and the reference pictures, reviewed every capture the agents produced, kept what worked and discarded what did not (a station generated from a picture lost to one drawn by script; a shuttle drawn by script lost to the generated one), and made every commit by hand from the messages the agents prepared. The agents wrote the code and the Blender scripts, adapted the copy of the classic portfolio, and worked with:
+
+- Blender 4.5 headless for the asset pipeline, and [Blender MCP](https://github.com/ahujasid/blender-mcp) to model live in my open Blender, checking each pass against the reference picture on renders from fixed cameras.
+- Local generation models alongside Claude: Qwen-Image through ComfyUI for concept pictures and Microsoft TRELLIS.2 for image-to-3D, both run on my own GPU. The Helios shuttle and buoy and the Atrium statue, banners and wall sconces come from that chain; the station, the robot and everything else is drawn by script.
+- Playwright through MCP to verify every change in a real browser: route captures at every stop, before/after crops at 2x, console and network checks and a production build before each commit.
+- CC0 or public-domain assets only: textures from Poly Haven and ambientCG, a model from Poly Haven and NASA imagery for the Earth.
+- Practices: specifications written in plan mode, an independent audit of the station's shader by a second agent, a reviewed commit log, verification sheets kept as process records and a persistent memory of lessons between sessions.
+
 ## Stack
 
-- Angular 22 (standalone, zoneless, signals) with static prerendering of all twelve routes
-- three.js r186 with `WebGPURenderer` and TSL node materials; bloom through `RenderPipeline` in Helios
+- Angular 22 (standalone, zoneless, signals) with static prerendering of all ten routes
+- three.js r186 with `WebGPURenderer` and TSL node materials; in Helios a selective bloom through `RenderPipeline` that only picks up what emits light
 - Lenis for smooth scrolling, with section anchors driving a keyframe camera rig
 - Tailwind CSS 4 plus per-world stylesheets and self-hosted variable fonts
 - Blender 4.5 run headless to build every model from a Python script, optimized with glTF Transform and meshopt
@@ -49,7 +63,13 @@ Each model is a deterministic Python script in `tools/blender/` that builds the 
 
 Set `BLENDER_PATH` when Blender is not installed in `C:/Program Files/Blender Foundation/Blender 4.5/`.
 
-The scripts also work interactively through [Blender MCP](https://github.com/ahujasid/blender-mcp) if you want an agent to edit a model live: install the add-on with `uvx mcp-for-blender install-addon`, register the server with `claude mcp add blender uvx mcp-for-blender` and press Connect in the MCP for Blender tab of the 3D viewport. The build itself only needs headless Blender.
+The scripts also work interactively through [Blender MCP](https://github.com/ahujasid/blender-mcp), which is how the Helios station was modelled: install the add-on with `uvx mcp-for-blender install-addon`, register the server with `claude mcp add blender uvx mcp-for-blender` and press Connect in the MCP for Blender tab of the 3D viewport. The build itself only needs headless Blender.
+
+### Generated and third-party assets
+
+- `tools/assets/trellis/` holds the assets generated with TRELLIS.2 from Qwen-Image pictures (the Helios shuttle and buoy; the Atrium statue, banners and sconces), and its README says how each was prepared. TRELLIS.2 is MIT but bundles NVIDIA components licensed for research and evaluation only, so these assets are not for sale: they are decoration of a personal portfolio.
+- `tools/assets/polyhaven/` holds the Television 02 model (CC0).
+- `public/textures/atrium/` and `public/textures/helios/` hold the textures (Poly Haven and ambientCG, CC0) and the NASA maps of the Earth (public domain), each with its source in a README.
 
 ## Architecture
 
@@ -64,6 +84,8 @@ Import the repository as a new project. `vercel.json` sets the build command, th
 
 ## Credits
 
-- Robot character by Tomás Laulhé (Quaternius), CC0 1.0, from the three.js examples; see `tools/vendor/README.md`.
+- Textures: Marble 01 and Blue Metal Plate by Rob Tuytel and Dark Wood by Dario Barresi, Dimitrios Savva and Rico Cilliers (Poly Haven, CC0); Marble 014 and Fabric 061 (ambientCG, CC0). Model: Television 02 by Benny Weimer (Poly Haven, CC0).
+- Earth: NASA Blue Marble, Black Marble and cloud imagery, public domain.
+- Generated assets: concept pictures from Qwen-Image (Apache-2.0) and meshes from Microsoft TRELLIS.2 (MIT, with NVIDIA components for research and evaluation only); see `tools/assets/trellis/README.md`.
 - Fonts: Instrument Sans, Fraunces, Unbounded, Syne, Michroma and Cormorant Garamond, all under the SIL Open Font License, served through Fontsource.
 - three.js, Lenis and glTF Transform under their respective licenses.
