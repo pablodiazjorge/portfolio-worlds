@@ -433,7 +433,12 @@ if os.path.exists(STATION_GLB):
                        and 1.2 < ext(pts)[2] < 2.6 and np.all(np.hypot(pts[:, 0], pts[:, 1]) > 2.35)
                        and ((np.all(np.abs(pts[:, 1]) < 2.0) and np.all(np.abs(pts[:, 0]) < 2.6))
                             or (np.all(np.abs(pts[:, 0]) < 1.3) and np.all(np.abs(pts[:, 1]) > 2.3))), log)
-    print(f"  [pw] old arrays stripped: {n1} vertices in the sector, then {n2[0]} blue pieces, {n3[0]} sockets, {n3d[0]} plates, {n4[0]} edge rods, {n5[0]} root bars by the hub, {n6[0]} edge knobs and {n7[0]} rods by the hub:")
+    # the pads the edge rods stood on, under the ring's outer corner on the same axis: they stand proud
+    # of the tube's curve and seem to float beside it
+    pad = lambda c: abs(c.x) < 1.2 and abs(c.y) > 15.0 and -3.0 < c.z < -2.3
+    n8 = strip_islands("station_generated", pad, lambda pts, rgb: len(pts) < 150 and max(ext(pts)) < 1.2
+                       and np.all(np.abs(pts[:, 0]) < 1.2) and np.all(np.abs(pts[:, 1]) > 15.0) and np.all(pts[:, 2] < -2.3), log)
+    print(f"  [pw] old arrays stripped: {n1} vertices in the sector, then {n2[0]} blue pieces, {n3[0]} sockets, {n3d[0]} plates, {n4[0]} edge rods, {n5[0]} root bars by the hub, {n6[0]} edge knobs, {n7[0]} rods by the hub and {n8[0]} pads under the edge:")
     for line in log:
         print("  [pw]   " + line)
     symmetric_arrays(1.5, 3.8, 9.4, 1.75)
