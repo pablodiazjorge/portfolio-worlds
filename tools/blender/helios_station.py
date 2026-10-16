@@ -12,6 +12,7 @@ import sys
 
 import bmesh
 import bpy
+import numpy as np
 from mathutils import Matrix, Vector
 
 sys.path.append(os.path.join(os.path.dirname(os.path.abspath(__file__)), "_lib"))
@@ -74,6 +75,117 @@ def place_generated(path, parent, name, scale, yaw, roll, shift=(0.0, 0.0, 0.0))
         o.rotation_euler = (roll, 0, yaw)
         o.scale = (scale, scale, scale)
 
+
+
+def strip_where(name, keep_out):
+    """Deletes the vertices of the generated mesh `name` for which `keep_out(co)` is true (its own frame,
+    before the roll), with the faces they carry: used to take away pieces the script draws again."""
+    o = bpy.data.objects[name]
+    bm = bmesh.new()
+    bm.from_mesh(o.data)
+    doomed = [v for v in bm.verts if keep_out(v.co)]
+    bmesh.ops.delete(bm, geom=doomed, context="VERTS")
+    bm.to_mesh(o.data)
+    bm.free()
+    return len(doomed)
+
+
+def strip_islands(name, zone, judge, log=None):
+    """Deletes every connected piece of the generated mesh `name` that has a vertex inside `zone` and for
+    which `judge(points, mean_rgb)` is true, given the piece's vertex positions and its mean baked colour
+    (sampled at its faces' centres): the leftovers of a cut that climb onto a neighbour (the old arrays'
+    ends over the ring, their masts' sockets and rods). `log` collects a line per piece removed. Size,
+    thinness or colour alone do not tell debris from skin here (the skin is cut into thousands of small
+    patches, and its section is not uniform enough for a distance test), so each rule pins a piece down
+    by colour, size and the pocket it lies in together."""
+    import numpy as np
+    o = bpy.data.objects[name]
+    bsdf = next(n for n in o.active_material.node_tree.nodes if n.type == "BSDF_PRINCIPLED")
+    img = bsdf.inputs["Base Color"].links[0].from_node.image
+    w, h = img.size
+    px = np.empty(w * h * img.channels, np.float32)
+    img.pixels.foreach_get(px)
+    tex = px.reshape(h, w, img.channels)[:, :, :3] * 255  # row 0 at the bottom, as Blender stores it
+    bm = bmesh.new()
+    bm.from_mesh(o.data)
+    bm.verts.ensure_lookup_table()
+    uv = bm.loops.layers.uv.active
+    seen, doomed, pieces = set(), [], 0
+    for seed in bm.verts:
+        if seed.index in seen or not zone(seed.co):
+            continue
+        island, stack = [], [seed]
+        seen.add(seed.index)
+        while stack:
+            v = stack.pop()
+            island.append(v)
+            for e in v.link_edges:
+                other = e.other_vert(v)
+                if other.index not in seen:
+                    seen.add(other.index)
+                    stack.append(other)
+        faces = {f for v in island for f in v.link_faces}
+        samples = []
+        for f in faces:
+            u = sum(l[uv].uv.x for l in f.loops) / len(f.loops)
+            vv = sum(l[uv].uv.y for l in f.loops) / len(f.loops)
+            samples.append(tex[min(h - 1, max(0, int(vv * h))), min(w - 1, max(0, int(u * w)))])
+        if not samples:
+            continue
+        mean = np.mean(np.array(samples), axis=0)
+        pts = np.array([v.co[:] for v in island])
+        if judge(pts, mean):
+            doomed.extend(island)
+            pieces += 1
+            if log is not None:
+                ext = pts.max(axis=0) - pts.min(axis=0)
+                log.append(f"{len(pts)} verts, extent {ext[0]:.2f} x {ext[1]:.2f} x {ext[2]:.2f}, luma {mean.mean():.0f}, at r {np.hypot(pts[:, 0], pts[:, 1]).mean():.1f}")
+    bmesh.ops.delete(bm, geom=doomed, context="VERTS")
+    bm.to_mesh(o.data)
+    bm.free()
+    return pieces, len(doomed)
+
+
+def symmetric_arrays(y_plane, z0, z1, half_width):
+    """Two identical solar arrays on the station's z axis (the placed frame: the hub axis is y, the
+    approach is -y), each a flat panel with a white rim on a mast that runs from the hub to the ring."""
+    bm_panel, bm_rim, bm_mast = bmesh.new(), bmesh.new(), bmesh.new()
+    length = z1 - z0
+    for side in (1, -1):
+        zc = side * (z0 + length / 2)
+        pw.add_box(bm_panel, (0, y_plane, zc), (half_width * 2, 0.08, length))
+        for sx in (1, -1):
+            pw.add_box(bm_rim, (sx * (half_width + 0.05), y_plane, zc), (0.1, 0.16, length + 0.2))
+        for sz in (1, -1):
+            pw.add_box(bm_rim, (0, y_plane, zc + sz * (length / 2 + 0.05)), (half_width * 2 + 0.2, 0.16, 0.1))
+        # the ring's inner wall is recessed on this axis (11.5 m from the hub at this height, measured on
+        # the mesh): the mast runs on into the tube, where the overshoot is hidden
+        cylinder_between(bm_mast, (0, y_plane + 0.18, side * 2.2), (0, y_plane + 0.18, side * 12.3), 0.13, 12)
+        # a foot where the mast meets the wall: a plate against it and a collar on the mast, which
+        # also cover the mount the old mast grew out of
+        pw.add_box(bm_rim, (0, y_plane + 0.18, side * 11.3), (1.4, 1.4, 0.3))
+        cylinder_between(bm_mast, (0, y_plane + 0.18, side * 10.5), (0, y_plane + 0.18, side * 11.2), 0.3, 16)
+        for k in (0.15, 0.5, 0.85):
+            pw.add_box(bm_rim, (0, y_plane + 0.12, side * (z0 + length * k)), (0.5, 0.16, 0.3))
+        # dividers between the cells, two columns by four rows, proud of the cells by a centimetre
+        pw.add_box(bm_rim, (0, y_plane, zc), (0.06, 0.1, length))
+        for k in (0.25, 0.5, 0.75):
+            pw.add_box(bm_rim, (0, y_plane, side * (z0 + length * k)), (half_width * 2, 0.1, 0.06))
+    obj("station_arrays", bm_panel, "solar", station)
+    obj("station_array_rims", bm_rim, "hull", station)
+    obj("station_array_masts", bm_mast, "truss", station)
+
+
+def dock_hatch(centre, depth, radius):
+    """A closed hatch set a little inside the docking port: a plain disc with a raised ring and a boss,
+    facing the approach (-y of the placed frame)."""
+    bm = bmesh.new()
+    cx, cy, cz = centre
+    for r, d, h in ((radius, depth, 0.12), (radius * 0.62, depth - 0.03, 0.06), (radius * 0.22, depth - 0.07, 0.08)):
+        verts = pw.add_cone(bm, (0, 0, 0), r, r, h, segments=48)
+        bmesh.ops.rotate(bm, verts=verts, cent=(0, 0, 0), matrix=Matrix.Rotation(math.pi / 2, 3, "X"))
+        bmesh.ops.translate(bm, verts=verts, vec=Vector((cx, cy + d, cz)))
+    obj("dock_hatch", bm, "hull", station, smooth=True)
 
 
 def obj(name, bm, mat, parent, smooth=False):
@@ -264,6 +376,69 @@ if os.path.exists(STATION_GLB):
     # put under its lights; the plain-hull station keeps everything TRELLIS made (ring, two long
     # modules crossing it with ports at their ends, two arrays, hub with its domed collar)
     place_generated(STATION_GLB, station, "station_generated", STATION_SCALE, STATION_YAW, STATION_ROLL, shift=STATION_SHIFT)
+    # the two arrays TRELLIS made differ in size and sit askew: they go (everything in the sector
+    # about the model's y axis between the hub and the ring, below the ring's mid-plane, short of the
+    # ring's inner face at 10 m) and two identical ones are drawn on the same axis, with a mast each
+    # from the hub to the ring
+    n1 = strip_where("station_generated", lambda c: abs(c.x) < 4.5 and abs(c.y) > 3.2 and math.hypot(c.x, c.y) < 9.85 and -3.0 < c.z < -0.1)
+    # (their roots on the hub, between 2.2 and 3.3 m from the centre, share that space with the root
+    # collars of the two modules, which a box cut tears; they go piece by piece below)
+    # the ends of the old arrays reached the ring's inner face and bend over it, past that cut: every
+    # piece touching the strip along the ring there whose bake is solar blue goes too (the ring's own
+    # patches are light grey and stay), and so do the thin rods of the old masts with their knobs
+    log = []
+    ext = lambda pts: pts.max(axis=0) - pts.min(axis=0)
+    zone = lambda c: abs(c.x) < 4.6 and 9.0 < abs(c.y) < 10.9 and -3.3 < c.z < 0.5
+    n2 = strip_islands("station_generated", zone, lambda pts, rgb: rgb[2] > rgb[0] + 30 and rgb.mean() < 110, log)
+    # the dark metal sockets of the old masts on the ring's inner face, the size of a hand: small in
+    # every axis, dark and wholly inside their pocket (the skin there is light; without the colour test
+    # the rule took light slivers of skin and pricked the wall with pinholes). The light mount plate
+    # the old mast grew out of stays on the wall: the new mast runs into it
+    pocket = lambda c: abs(c.x) < 2.5 and 9.5 < abs(c.y) < 12.0 and -3.3 < c.z < 0.3
+    n3 = strip_islands("station_generated", pocket, lambda pts, rgb: len(pts) < 400 and rgb.mean() < 120
+                       and all(pocket(Vector(q)) for q in pts)
+                       and (max(ext(pts)) < 2.0 or (max(ext(pts)) < 2.6 and sorted(ext(pts))[1] < 0.3)), log)
+    # (a rule for the scraps of the joints by size and shape alone opened a hole of two metres in the
+    # wall next to the mount, seen from inside the ring: nothing of that kind is applied)
+    # (the black flat strips at the height of the inner equator are the wall's own skin, painted black
+    # by the bake, so nothing takes them: the wall sits 10 to 12 m from the axis depending on the angle)
+    # the end plate and the frame bar of the old arrays standing against the inner wall: thin along y,
+    # metres long along x, darker than the paint
+    plate = lambda c: abs(c.x) < 2.5 and 10.8 < abs(c.y) < 11.8 and -2.8 < c.z < 0.0
+    n3d = strip_islands("station_generated", plate, lambda pts, rgb: len(pts) < 200 and rgb.mean() < 120
+                        and ext(pts)[1] < 0.3 and ext(pts)[0] > 3.0 and np.all(np.abs(pts[:, 1]) > 10.5), log)
+    # the dark rods standing on the ring's outer edge on the same axis (knobs seen from above): thin,
+    # one to three metres long, dark, and nowhere near the skin's light colour
+    edge = lambda c: abs(c.x) < 1.5 and abs(c.y) > 15.0 and -3.5 < c.z < 1.8
+    n4 = strip_islands("station_generated", edge, lambda pts, rgb: len(pts) < 200 and rgb.mean() < 110
+                       and sorted(ext(pts))[1] < 1.0 and 1.0 < max(ext(pts)) < 3.0
+                       and np.all(np.abs(pts[:, 0]) < 2.0) and np.all(np.hypot(pts[:, 0], pts[:, 1]) > 14.5), log)
+    # the roots of the old arrays by the hub (the yoke that joined them to it, their rim bars and the
+    # serrated strip of panel the sector cut leaves): bars and plates a metre or more along x, narrow
+    # in y and z, in the band from 2.2 to 3.4 m from the centre; the modules' root collars there are
+    # made of short curved patches and the hub's skin ends at 2.1 m on this axis
+    root = lambda c: abs(c.x) < 2.3 and 2.2 < abs(c.y) < 3.4 and -3.0 < c.z < -0.1
+    n5 = strip_islands("station_generated", root, lambda pts, rgb: len(pts) < 400 and ext(pts)[0] > 1.0
+                       and ext(pts)[1] < 0.6 and ext(pts)[2] < 0.4 and np.all(np.abs(pts[:, 1]) > 2.15), log)
+    # the knobs on the ring's outer edge on the array axis, the size of a fist, with their chips: small,
+    # darker than the skin, wholly in their spot (the skin's slivers there are tiny and light)
+    knob = lambda c: abs(c.x) < 0.6 and 15.5 < abs(c.y) < 16.3 and -0.7 < c.z < -0.1
+    n6 = strip_islands("station_generated", knob, lambda pts, rgb: len(pts) < 80 and rgb.mean() < 125 and max(ext(pts)) < 0.7
+                       and np.all(np.abs(pts[:, 0]) < 0.6) and np.all(np.abs(pts[:, 1]) > 15.5), log)
+    # the vertical rods standing by the hub, half a metre to a metre off its skin (which ends 2.1 m from
+    # the centre): thin, one to two and a half metres tall; four beside the modules' collars inside
+    # |y| 2 (the modules' own skin lies beyond 2.07 there) and the rest on the arrays' axis within |x| 1.3
+    rods = lambda c: 2.4 < math.hypot(c.x, c.y) < 3.5 and abs(c.x) < 3.0 and -2.0 < c.z < 1.0
+    n7 = strip_islands("station_generated", rods, lambda pts, rgb: len(pts) < 150 and sorted(ext(pts))[1] < 0.5
+                       and 1.2 < ext(pts)[2] < 2.6 and np.all(np.hypot(pts[:, 0], pts[:, 1]) > 2.35)
+                       and ((np.all(np.abs(pts[:, 1]) < 2.0) and np.all(np.abs(pts[:, 0]) < 2.6))
+                            or (np.all(np.abs(pts[:, 0]) < 1.3) and np.all(np.abs(pts[:, 1]) > 2.3))), log)
+    print(f"  [pw] old arrays stripped: {n1} vertices in the sector, then {n2[0]} blue pieces, {n3[0]} sockets, {n3d[0]} plates, {n4[0]} edge rods, {n5[0]} root bars by the hub, {n6[0]} edge knobs and {n7[0]} rods by the hub:")
+    for line in log:
+        print("  [pw]   " + line)
+    symmetric_arrays(1.5, 3.8, 9.4, 1.75)
+    # a hatch closes the port on the hub's dome (the port is 0.1 m off the axis after the shift)
+    dock_hatch((0.1, -2.89, 0.0), 0.35, 0.86)
 else:
     build_station()
 if os.path.exists(SHUTTLE_GLB):

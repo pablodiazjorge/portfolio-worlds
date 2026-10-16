@@ -45,7 +45,14 @@ not committed. The museum script places each asset when its file exists with
   whole wheel slowly about its hub, lifts the bake a tenth (it comes back a shade dark), flattens the
   ring's colour to the paint and draws its seams itself, one every 18 degrees and none across the joints
   with the arms, because TRELLIS bakes a picture's thin panel lines as wide, fuzzy bands (audit in
-  `_docs-internal/process/helios/2026-10-15-auditoria-estacion-lisa.md`); the modules keep their bake. It
+  `_docs-internal/process/helios/2026-10-15-auditoria-estacion-lisa.md`); the modules keep their bake. Its
+  two arrays, unequal and askew, are cut away with their masts and drawn again as two identical panels
+  on masts from the hub to the ring, and a hatch closes the port; the debris the cut leaves by the ring
+  (sockets, a plate and a bar, rods on the outer edge, the yoke by the hub) goes by rules that pin each
+  piece down by colour, size and pocket together, because the ring's skin comes in thousands of small
+  patches, its section is not uniform and its inner equator is baked black (broader rules opened holes,
+  caught by a coverage check and by renders of the joints from inside the ring; see the process report,
+  pass 14); the masts run on to 12.3 m, into the inner wall, which is recessed to 11.5 m on that axis, and end in a drawn foot that covers the old mount. It
   replaces `helios_station.glb`, the wheel on four spokes from `station-8-sq.png` whose bent solar wings
   had to be cut off and drawn again, removed from the repository with it; an intermediate smooth station
   from `station-smooth-1.png` (a torus on two spokes with a hub cylinder and antennas, `helios_station2`)
