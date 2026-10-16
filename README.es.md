@@ -40,11 +40,12 @@ Cada modelo es un script de Python determinista en `tools/blender/` que construy
 
 | Modelo | Tamaño | Presupuesto |
 | --- | --- | --- |
-| Valle de Atlas | 470 KB | 1600 KB |
-| Dron de Aeris | 84 KB | 900 KB |
-| Estación de Helios | 88 KB | 900 KB |
-| Museo de Atrium | 74 KB | 900 KB |
-| Robot de Atrium | 216 KB | 500 KB |
+| Valle de Atlas | 2583 KB | 2600 KB |
+| Dron de Aeris | 109 KB | 900 KB |
+| Monitor de Aeris | 41 KB | 400 KB |
+| Estación de Helios | 5847 KB | 18000 KB |
+| Museo de Atrium | 5600 KB | 6500 KB |
+| Robot de Atrium | 154 KB | 500 KB |
 
 Define `BLENDER_PATH` si Blender no está instalado en `C:/Program Files/Blender Foundation/Blender 4.5/`.
 

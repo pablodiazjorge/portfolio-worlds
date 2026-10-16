@@ -1,6 +1,9 @@
 """HELIOS: an orbital station with a habitat ring, drawn after the first picture Qwen-Image made for it
 (a wheel on four spokes with tank modules, a hub tower, a docking tube and two solar wings on trusses),
-plus the generated shuttle that flies to it and the generated buoy the route is marked with.
+plus the generated shuttle that flies to it and the generated buoy the route is marked with. As in the
+picture, the ring is a polygon of sixteen straight drums joined at the gold bands by collars a little
+thicker than the drums, and the tanks, the tower and the docking tube are sunk between their bands too,
+so the hull reads as built from sections rather than turned smooth.
 
 Blender axes (the station's own frame, which the scene places as it is): the hub axis runs along Y,
 the shuttle approaches from -Y, the ring lies in the X-Z plane and the wings run along X. The shuttle
@@ -54,7 +57,8 @@ BUOY_STROBE_Z = 0.52  # the centre of the generated buoy's red lamp, measured on
 SHUTTLE_SCALE, SHUTTLE_YAW, SHUTTLE_ROLL = 1.0, 0.0, 0.0
 
 # --- the station's measures, read off the picture and scaled to a 30 m ring ------------------------
-RING_R, RING_TUBE = 13.0, 1.9  # centre-line radius of the habitat ring and the radius of its tube
+RING_R, RING_TUBE = 13.0, 1.9  # centre-line radius of the habitat ring and the radius of its collars
+RECESS, COLLAR = 0.12, 0.8  # how far the skin sinks between the bands, and the length of the collars under them
 HUB_R = 2.6  # the hub tower
 TANK_R, TANK_LEN, TANK_AT = 1.9, 5.0, 6.6  # the modules on the spokes: radius, length, distance of their centre from the axis
 SPOKE_R = 0.9
@@ -135,67 +139,68 @@ def tube_y(bm, y0, y1, r_out, r_in, segments=48):
     return ring + moved
 
 
-def torus_y(bm, big_r, tube_r, segments=96, sides=32, start=0.0, angle=2 * math.pi):
-    """A torus (or an arc of one) about the Y axis: a circle of `tube_r` in the X-Y plane at x = big_r,
-    spun around Y. Returns its vertices."""
-    res = bmesh.ops.create_circle(bm, cap_ends=False, radius=tube_r, segments=sides)
-    circle = res["verts"]
-    bmesh.ops.translate(bm, verts=circle, vec=Vector((big_r, 0, 0)))
-    if start:
-        bmesh.ops.rotate(bm, verts=circle, cent=(0, 0, 0), matrix=about_y(start))
-    edges = [e for e in bm.edges if e.verts[0] in set(circle) and e.verts[1] in set(circle)]
-    full = abs(angle - 2 * math.pi) < 1e-6
-    spun = bmesh.ops.spin(bm, geom=circle + edges, cent=(0, 0, 0), axis=(0, 1, 0), dvec=(0, 0, 0), angle=-angle, steps=segments, use_merge=full)
-    return circle + [g for g in spun["geom_last"] if isinstance(g, bmesh.types.BMVert)]
-
-
 def build_station():
     body = pw.empty("station_body", (0, 0, 0))
     body.parent = station
     hull, gold, truss, solar, glass, windows = bmesh.new(), bmesh.new(), bmesh.new(), bmesh.new(), bmesh.new(), bmesh.new()
 
-    # --- the habitat ring: a torus with a raised band every 22.5 degrees and window strips on the
-    # outer equator and the inner face, as the picture's segmented ring -------------------------------
-    torus_y(hull, RING_R, RING_TUBE)
-    for k in range(16):
-        a = k * math.pi / 8
-        torus_y(gold, RING_R, RING_TUBE + 0.06, segments=4, sides=32, start=a - 0.16 / RING_R, angle=0.32 / RING_R)
-    for k in range(16):
-        for j in range(3):  # three glazed strips per segment on the outer face, two rows, one on the inner face
-            a = k * math.pi / 8 + (j + 1) * math.pi / 32
-            for y in (0.42, -0.42):
-                box_at(windows, (RING_R + RING_TUBE - 0.03, y, 0.0), (0.08, 0.36, 1.05), about_y(a))
-            box_at(windows, (RING_R - RING_TUBE + 0.03, 0.2, 0.0), (0.08, 0.3, 1.05), about_y(a))
+    # --- the habitat ring: sixteen straight drums, round in section and sunk, joined every 22.5
+    # degrees by a collar at the full radius with a gold band on it, as the picture's segmented ring;
+    # three glazed strips per drum on the outer face in two rows and one on the inner face -------------
+    def ring_point(a):
+        return about_y(a) @ Vector((RING_R, 0, 0))
 
-    # --- four spokes with a tank module each, and gold bands on the tanks ---------------------------
+    for k in range(16):
+        a0, a1 = k * math.pi / 8, (k + 1) * math.pi / 8
+        am = (a0 + a1) / 2
+        p0, p1 = ring_point(a0), ring_point(a1)
+        cylinder_between(hull, p0, p1, RING_TUBE - RECESS, 32)
+        t = about_y(a0) @ Vector((0, 0, 1))  # the tangent at the joint: the drum ends tilt 11.25 degrees to it and stay inside the collar
+        cylinder_between(hull, p0 - t * (COLLAR / 2), p0 + t * (COLLAR / 2), RING_TUBE, 32)
+        cylinder_between(gold, p0 - t * 0.16, p0 + t * 0.16, RING_TUBE + 0.06, 32)
+        n = about_y(am) @ Vector((1, 0, 0))  # the drum's outward normal: its skin runs along the chord, not the circle
+        for j in range(3):
+            c = p0.lerp(p1, (j + 1) / 4)
+            for y in (0.42, -0.42):
+                box_at(windows, c + n * (RING_TUBE - RECESS - 0.03) + Vector((0, y, 0)), (0.08, 0.36, 1.05), about_y(am))
+            box_at(windows, c - n * (RING_TUBE - RECESS - 0.03) + Vector((0, 0.2, 0)), (0.08, 0.3, 1.05), about_y(am))
+
+    # --- four spokes with a tank module each: a sunk skin between domed ends, collars at the full
+    # radius under the three gold bands and at both ends, portholes in the bays between ---------------
     for k in range(4):
         rot = about_y(k * math.pi / 2)
         d = rot @ Vector((1, 0, 0))
         cylinder_between(hull, d * (HUB_R - 0.3), d * (RING_R - RING_TUBE + 0.4), SPOKE_R, 24)
         c0, c1 = d * (TANK_AT - TANK_LEN / 2), d * (TANK_AT + TANK_LEN / 2)
-        cylinder_between(hull, c0, c1, TANK_R, 40)
+        cylinder_between(hull, c0, c1, TANK_R - RECESS, 40)
         for c in (c0, c1):
             res = bmesh.ops.create_uvsphere(hull, u_segments=32, v_segments=16, radius=TANK_R)
             bmesh.ops.translate(hull, verts=res["verts"], vec=c)
+        for t in (0.0, 0.22, 0.5, 0.78, 1.0):
+            c = c0.lerp(c1, t)
+            cylinder_between(hull, c - d * 0.3, c + d * 0.3, TANK_R, 40)
         for t in (0.22, 0.5, 0.78):
             c = c0.lerp(c1, t)
             cylinder_between(gold, c - d * 0.09, c + d * 0.09, TANK_R + 0.05, 40)
         for c in (c0 - d * TANK_R * 0.55, c1 + d * TANK_R * 0.55):
             cylinder_between(gold, c - d * 0.12, c + d * 0.12, SPOKE_R + 0.3, 24)
-        box_at(hull, d * TANK_AT + Vector((0, TANK_R + 0.2, 0)), (1.6, 0.5, 1.2), rot)
-        box_at(truss, d * TANK_AT + Vector((0, TANK_R + 0.5, 0)), (0.12, 0.6, 0.12), rot)
-        # two rings of portholes on each tank, between its bands
-        for along in (TANK_AT - 1.0, TANK_AT + 1.0):
+        box_at(hull, d * TANK_AT + Vector((0, TANK_R - RECESS + 0.2, 0)), (1.6, 0.5, 1.2), rot)
+        box_at(truss, d * TANK_AT + Vector((0, TANK_R - RECESS + 0.5, 0)), (0.12, 0.6, 0.12), rot)
+        # two rings of portholes on each tank, in the middle of the bays either side of the central band
+        for along in (TANK_AT - 0.7, TANK_AT + 0.7):
             for j in range(8):
                 ang = j * math.pi / 4 + math.pi / 8
-                box_at(windows, (along, TANK_R * math.sin(ang), TANK_R * math.cos(ang)), (0.42, 0.24, 0.24), rot)
+                box_at(windows, (along, (TANK_R - RECESS) * math.sin(ang), (TANK_R - RECESS) * math.cos(ang)), (0.42, 0.24, 0.24), rot)
         # a collar where the spoke meets the ring
         cylinder_between(gold, d * (RING_R - RING_TUBE - 0.1), d * (RING_R - RING_TUBE + 0.15), SPOKE_R + 0.12, 24)
         cylinder_between(gold, d * (HUB_R - 0.05), d * (HUB_R + 0.3), SPOKE_R + 0.12, 24)
 
     # --- the hub: a tower on the far side with a stepped cap and a mast, a cupola on its flank, and
-    # the docking tube on the approach side with its flange, hatch and collar -------------------------
-    cylinder_between(hull, (0, -2.0, 0), (0, 6.2, 0), HUB_R, 48)
+    # the docking tube on the approach side with its flange, hatch and collar; the tower's skin is sunk
+    # between collars at its foot, under its two gold rings and under the observation band ------------
+    cylinder_between(hull, (0, -2.0, 0), (0, 6.2, 0), HUB_R - RECESS, 48)
+    for y0, y1 in ((-2.0, -1.4), (0.5, 1.1), (2.9, 3.5), (4.3, 6.2)):
+        cylinder_between(hull, (0, y0, 0), (0, y1, 0), HUB_R, 48)
     cylinder_between(hull, (0, 4.6, 0), (0, 5.6, 0), HUB_R + 0.35, 48)  # the observation band, a little wider
     cylinder_between(hull, (0, 6.2, 0), (0, 7.3, 0), HUB_R, 48, radius2=1.5)
     cylinder_between(hull, (0, 7.3, 0), (0, 8.1, 0), 1.5, 32)
@@ -212,7 +217,7 @@ def build_station():
     for j in range(16):
         box_at(windows, (HUB_R + 0.35 - 0.04, 5.1, 0.0), (0.1, 0.55, 0.62), about_y(j * math.pi / 8 + math.pi / 16))
     for j in range(12):
-        box_at(windows, (HUB_R - 0.04, 2.0, 0.0), (0.1, 0.4, 0.5), about_y(j * math.pi / 6))
+        box_at(windows, (HUB_R - RECESS - 0.04, 2.0, 0.0), (0.1, 0.4, 0.5), about_y(j * math.pi / 6))
     res = bmesh.ops.create_uvsphere(glass, u_segments=24, v_segments=12, radius=0.85)
     bmesh.ops.translate(glass, verts=res["verts"], vec=Vector((0, 3.9, HUB_R - 0.15)))
     cylinder_between(hull, (0, 3.9, HUB_R - 0.6), (0, 3.9, HUB_R + 0.05), 1.0, 24)
@@ -220,8 +225,10 @@ def build_station():
     # a flange and a gold collar at the mouth, and a plasma field across it (its own material) that
     # the scene makes translucent and alive
     inner_r = DOCK_TUBE_R - 0.18
-    tube_y(hull, -2.0, DOCK_END + 0.4, DOCK_TUBE_R, inner_r, 48)
-    tube_y(hull, DOCK_END + 0.4, DOCK_END, DOCK_TUBE_R + 0.5, inner_r, 48)
+    tube_y(hull, -2.0, DOCK_END + 0.4, DOCK_TUBE_R - 0.1, inner_r, 48)  # the sunk skin, hollow
+    for yc in (-2.3, -3.0, -4.2):  # collars at the hub and under the two gold rings: rings round the skin, so the corridor stays open
+        tube_y(hull, yc + 0.25, yc - 0.25, DOCK_TUBE_R, DOCK_TUBE_R - 0.14, 48)
+    tube_y(hull, DOCK_END + 0.4, DOCK_END, DOCK_TUBE_R + 0.5, inner_r, 48)  # the flange at the mouth
     tube_y(gold, DOCK_END + 0.02, DOCK_END - 0.1, DOCK_TUBE_R + 0.18, inner_r + 0.06, 48)
     cylinder_between(hull, (0, -1.9, 0), (0, -2.05, 0), inner_r + 0.02, 48)  # the bulkhead
     cylinder_between(gold, (0, -2.05, 0), (0, -2.15, 0), 0.75, 32)
@@ -275,6 +282,10 @@ def build_station():
 
     for bm in (hull, gold, truss, solar, glass, windows, *beacons.values()):
         bmesh.ops.recalc_face_normals(bm, faces=bm.faces[:])
+    for bm in (hull, gold):  # the steps between collars and sunk skins, and the caps, stay crisp under smooth shading
+        for e in bm.edges:
+            if len(e.link_faces) == 2 and e.calc_face_angle(0.0) > math.radians(35):
+                e.smooth = False
     obj("station_hull", hull, "hull", body, smooth=True)
     obj("station_gold", gold, "gold", body, smooth=True)
     obj("station_truss", truss, "truss", body)

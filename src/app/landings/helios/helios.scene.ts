@@ -17,6 +17,7 @@ import {
   pass,
   pmremTexture,
   positionLocal,
+  positionView,
   positionViewDirection,
   positionWorld,
   positionWorldDirection,
@@ -207,37 +208,36 @@ export class HeliosScene implements WorldScene {
     lib.forEach((m) => this.bag.add(m));
   }
 
-  /** The station's hull: painted panels drawn from the model's own frame (the hub axis is local z, the
-   *  ring lies in the x-y plane), with a seam every 7.5 degrees and every 30 degrees of tube on the ring
-   *  and a 1.25 m grid on the hub, the tanks and the tube, a tone of its own per panel, grime along the
-   *  seams and a worn roughness. */
+  /** The station's hull: painted plates drawn from the model's own frame (the hub axis is local z, the
+   *  ring lies in the x-y plane). The relief between the gold bands is modelled, so the shader only adds
+   *  a faint seam down the middle of each drum of the ring and a 2.5 m grid of plates elsewhere, a tone
+   *  of its own per plate, grime along the seams and a worn roughness; the seams fade with distance so
+   *  the hull never reads as ruled paper from afar. */
   private hullMaterial(): THREE.MeshStandardNodeMaterial {
     const m = new THREE.MeshStandardNodeMaterial({ metalness: 0.12 });
     const p = positionLocal;
     const r = p.xy.length();
     const onRing = smoothstep(9.2, 9.8, r);
-    // the ring: seams along the meridians and around the tube
-    const deg = atan(p.y, p.x).mul(180 / Math.PI).add(360).mod(7.5);
-    const meridian = abs(deg.sub(3.75)).mul(Math.PI / 180).mul(r);
-    const tube = atan(p.z, r.sub(13.0)).mul(180 / Math.PI).add(360).mod(30);
-    const around = abs(tube.sub(15)).mul(Math.PI / 180).mul(1.9);
-    const ringSeam = min(meridian, around);
-    const ringCell = atan(p.y, p.x).mul(180 / Math.PI).add(360).div(7.5).floor().add(atan(p.z, r.sub(13.0)).mul(180 / Math.PI).add(360).div(30).floor().mul(97));
+    // the ring: the drums are joined every 22.5 degrees, so one seam halfway along each
+    const deg = atan(p.y, p.x).mul(180 / Math.PI).add(360);
+    const ringSeam = abs(deg.mod(22.5).sub(11.25)).mul(Math.PI / 180).mul(r);
+    const ringCell = deg.div(22.5).floor().add(step(0, p.z).mul(31));
     // everything else: a grid of plates in the model's frame
-    const g = p.div(1.25);
-    const gf = g.fract().sub(0.5).abs().mul(-1).add(0.5).mul(1.25);
+    const g = p.div(2.5);
+    const gf = g.fract().sub(0.5).abs().mul(-1).add(0.5).mul(2.5);
     const boxSeam = min(min(gf.x, gf.y), gf.z);
     const boxCell = g.floor();
     const seamDist = mix(boxSeam, ringSeam, onRing);
     const cellId = mix(boxCell.x.add(boxCell.y.mul(37)).add(boxCell.z.mul(113)), ringCell, onRing);
     const aa = fwidth(seamDist).max(0.01);
-    const seam = oneMinus(smoothstep(float(0.025).sub(aa), float(0.025).add(aa), seamDist));
-    const grime = smoothstep(0.0, 0.22, seamDist).mul(0.14).add(0.86);
-    const tone = mix(0.94, 1.04, hash(cellId.add(0.5)));
+    const near = oneMinus(smoothstep(30, 90, positionView.z.negate()));
+    const seam = oneMinus(smoothstep(float(0.02).sub(aa), float(0.02).add(aa), seamDist)).mul(near);
+    const grime = smoothstep(0.0, 0.3, seamDist).mul(0.1).add(0.9);
+    const tone = mix(0.94, 1.03, hash(cellId.add(0.5)));
     const wear = mx_fractal_noise_float(p.mul(0.9)).mul(0.5).add(0.5);
-    const paint = color('#cfd3d8').mul(tone).mul(grime).mul(wear.mul(0.08).add(0.96));
-    m.colorNode = mix(paint, color('#4a4f57'), seam);
-    m.roughnessNode = wear.mul(0.22).add(0.38).add(seam.mul(0.3));
+    const paint = color('#cbd0d6').mul(tone).mul(grime).mul(wear.mul(0.08).add(0.96));
+    m.colorNode = mix(paint, paint.mul(0.72), seam);
+    m.roughnessNode = wear.mul(0.22).add(0.4).add(seam.mul(0.2));
     return m;
   }
 
