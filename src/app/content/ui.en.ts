@@ -28,7 +28,7 @@ export const UI_EN = {
     scroll: 'Scroll to explore',
     more: 'Read more',
     classic: 'Classic portfolio',
-    builtWith: 'Built with Angular 22, three.js WebGPU and Blender.',
+    builtWith: 'Built with Angular 22, three.js WebGPU and Blender, and developed with AI agents under my direction.',
   },
   atlas: {
     start: 'Start the climb',
@@ -79,6 +79,7 @@ export const UI_EN = {
     choose: 'Choose a world',
     enter: 'Enter',
     classic: 'Prefer a plain page? Visit the classic portfolio',
+    made: 'A snapshot of my portfolio as of October 2026, built as an experiment in a way of working and left as it is; the classic portfolio is the one I keep up to date. It was built end to end with AI coding agents under my direction: the concepts, the references, every review of what they produced and every commit were mine. The agents wrote the code and the Blender scripts, modelled live through MCP, generated concept pictures and 3D assets with local models alongside Claude, and checked every page in a real browser.',
   },
   worlds: {
     atlas: {

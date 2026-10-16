@@ -14,6 +14,13 @@ describe('portfolio content', () => {
     PORTFOLIO_ES.projects.forEach((project, i) => expect(project.tagline).not.toBe(PORTFOLIO_EN.projects[i].tagline));
   });
 
+  it('says in both languages how the site was made', () => {
+    for (const ui of [UI_EN, UI_ES]) {
+      expect(ui.hub.made.length).toBeGreaterThan(80);
+      expect(ui.common.builtWith).toMatch(/AI agents|agentes de IA/);
+    }
+  });
+
   it('avoids the em dash in the Spanish copy', () => {
     expect(JSON.stringify(PORTFOLIO_ES)).not.toContain('—');
     expect(JSON.stringify(UI_ES)).not.toContain('—');

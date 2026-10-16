@@ -216,6 +216,12 @@
   line-height: 1.55;
 }
 
+.hub-lead .hub-made {
+  margin-top: 0.6rem;
+  color: rgb(242 240 236 / 0.55);
+  font-size: 0.9rem;
+}
+
 .hub-lead .hub-title {
   margin-bottom: 0.35rem;
   color: #f2f0ec;

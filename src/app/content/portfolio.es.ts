@@ -19,7 +19,7 @@ export const PORTFOLIO_ES: Portfolio = {
   about: [
     'Lo que empezó en el instituto como un simple experimento se ha convertido en mi vocación. Hoy trabajo como ingeniero de software e ingeniero de IA: diseño y construyo sistemas escalables con un enfoque orientado a la arquitectura, la calidad del diseño y las buenas prácticas de ingeniería, y aplico la inteligencia artificial para mejorar la forma en que se desarrolla el software.',
     'Soy Frontend Engineer en Infoport Valencia, donde creo interfaces accesibles y escalables para la logística portuaria con Angular y TypeScript. En código abierto construyo herramientas para agentes de IA y mido lo que aportan: contribuyo a rea, un proyecto de ingeniería inversa con más de 130.000 estrellas, y en rea-lab medí con un estudio preregistrado qué le aporta a un agente de programación.',
-    'En mi tiempo libre suelo hacer deporte: puede que me veas sufrir en el gimnasio, por la montaña haciendo senderismo, leyendo novelas o sentado en un bar con amigos.',
+    'Fuera del código suelo hacer deporte: puede que me veas sufrir en el gimnasio o haciendo senderismo por la montaña, y si no, leyendo novelas o sentado en un bar con amigos.',
   ],
   experience: [
     {
@@ -71,7 +71,7 @@ export const PORTFOLIO_ES: Portfolio = {
       contract: 'Contrato de prácticas - Jornada completa',
       summary: 'Análisis y diseño de bases de datos para los planes retributivos de dos unidades de negocio.',
       description:
-        'Análisis y diseño de base de datos para el plan retributivo de la UNE de Consultoría y Sistemas de la Información y la UNE de Automatización y Control.',
+        'Análisis y diseño de base de datos para el plan retributivo de las unidades de negocio de Consultoría y Sistemas de Información y de Automatización y Control.',
     },
   ],
   projects: [
@@ -149,7 +149,7 @@ export const PORTFOLIO_ES: Portfolio = {
     {
       ...project('portfolio'),
       title: 'Mi portfolio',
-      tagline: 'La edición clásica de este portfolio, con prerenderizado y dos idiomas.',
+      tagline: 'La edición clásica de este portfolio, con SSR y dos idiomas.',
       description:
         'Portfolio personal construido con Angular y Tailwind CSS 4, con prerenderizado por idioma, i18n (ES/EN), tema claro y oscuro y carga diferida para una experiencia rápida y accesible.',
       tech: ['Angular', 'SSR y prerenderizado', 'Tailwind CSS 4', 'ngx-translate', 'PostCSS'],

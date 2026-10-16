@@ -22,7 +22,7 @@ export const UI_ES: UiDict = {
     code: 'Código',
     demo: 'Demo en vivo',
     present: 'Actualidad',
-    cv: 'Currículum vitae (PDF)',
+    cv: 'Currículum vítae (PDF)',
     github: 'GitHub',
     linkedin: 'LinkedIn',
     close: 'Cerrar',
@@ -30,7 +30,7 @@ export const UI_ES: UiDict = {
     scroll: 'Desplázate para explorar',
     more: 'Leer más',
     classic: 'Portfolio clásico',
-    builtWith: 'Hecho con Angular 22, three.js WebGPU y Blender.',
+    builtWith: 'Hecho con Angular 22, three.js WebGPU y Blender, y desarrollado con agentes de IA bajo mi dirección.',
   },
   atlas: {
     start: 'Empezar la subida',
@@ -61,7 +61,7 @@ export const UI_ES: UiDict = {
     contactLead: 'Atracado y a la escucha. Escríbeme por LinkedIn o GitHub sobre un puesto, un proyecto o una idea.',
   },
   atrium: {
-    welcome: 'Bienvenido a la galería',
+    welcome: 'Te doy la bienvenida a la galería',
     welcomeLead: 'Cada cuadro de las paredes es un proyecto, las vitrinas guardan los capítulos de mi experiencia, la estatua del centro habla de mí y el atril de la entrada es donde encontrarme.',
     hint: 'Camina con WASD o las flechas, mantén Mayús para correr y arrastra para mirar alrededor. Haz clic en un cuadro o en el suelo para ir allí.',
     hintTouch: 'Usa el mando para caminar y arrastra para mirar alrededor. Toca un cuadro o el suelo para ir allí.',
@@ -81,6 +81,7 @@ export const UI_ES: UiDict = {
     choose: 'Elige un mundo',
     enter: 'Entrar',
     classic: '¿Prefieres una página sencilla? Visita el portfolio clásico',
+    made: 'Una instantánea de mi portfolio a octubre de 2026, construida como experimento de una forma de trabajar y dejada tal cual; el portfolio clásico es el que mantengo al día. Se hizo de principio a fin con agentes de IA bajo mi dirección: los conceptos, las referencias, cada revisión de lo que producían y cada commit han sido míos. Los agentes escribieron el código y los guiones de Blender, modelaron en vivo por MCP, generaron imágenes de concepto y activos 3D con modelos locales junto a Claude y comprobaron cada página en un navegador real.',
   },
   worlds: {
     atlas: {
