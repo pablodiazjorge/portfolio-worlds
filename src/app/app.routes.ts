@@ -16,4 +16,10 @@ function localized(lang: Lang): Routes {
   ];
 }
 
-export const routes: Routes = [...localized('es'), ...localized('en'), { path: '**', redirectTo: '' }];
+// an unknown path keeps its language: under /es it falls back to the Spanish hub, elsewhere to the English one
+export const routes: Routes = [
+  ...localized('es'),
+  { path: 'es', children: [{ path: '**', redirectTo: '/es' }] },
+  ...localized('en'),
+  { path: '**', redirectTo: '' },
+];
