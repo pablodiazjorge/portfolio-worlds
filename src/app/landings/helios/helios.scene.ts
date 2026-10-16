@@ -1,15 +1,18 @@
 import * as THREE from 'three/webgpu';
 import {
   abs,
+  atan,
   color,
   dot,
   float,
+  fwidth,
   hash,
   max,
   mix,
   mx_fractal_noise_float,
   normalize,
   normalView,
+  oneMinus,
   pass,
   pmremTexture,
   positionLocal,
@@ -152,8 +155,6 @@ export class HeliosScene implements WorldScene {
     std('glass', { color: '#0a1220', roughness: 0.05, metalness: 0.4 });
     std('gold', { color: '#d4a64c', roughness: 0.3, metalness: 1 });
     std('buoy_body', { color: '#a9afb7', roughness: 0.5, metalness: 0.35 });
-    // the wings' masts and frames: a dull grey alloy that does not flare in the bloom
-    std('wing_frame', { color: '#767d87', roughness: 0.62, metalness: 0.4 });
 
     // the arrays catch the sun from the approach: matte enough not to flare white in the bloom
     const solar = new THREE.MeshStandardNodeMaterial({ roughness: 0.45, metalness: 0.3, side: THREE.DoubleSide });
@@ -186,18 +187,27 @@ export class HeliosScene implements WorldScene {
         for (const map of [baked, mrMap]) if (map) map.anisotropy = 16;
         const generated = new THREE.MeshStandardNodeMaterial({ roughness: 0.6, metalness: 0.2 });
         if (baked) {
-          let base = texture(baked).rgb.mul(1.05);
+          let base = texture(baked).rgb;
           if (source.name === 'station_tex') {
-            // the bake comes back soft: a lattice of hull seams and a shade of its own per plate,
-            // drawn from the model's own frame, give the hull back its edges
-            const q = positionLocal.div(vec3(0.9, 0.9, 0.9));
-            const cell = q.floor();
-            const edge = q.fract().sub(0.5).abs().mul(-1).add(0.5);
-            const seam = smoothstep(0.012, 0.03, edge.x.min(edge.y).min(edge.z));
-            const plate = mix(0.93, 1.05, hash(cell.x.add(cell.y.mul(37)).add(cell.z.mul(113))));
-            base = base.mul(mix(0.68, 1.0, seam)).mul(plate);
+            // the bake draws the ring's panel seams as wide, fuzzy bands (TRELLIS reads the picture
+            // at a scale where its 6 cm lines vanish) and comes back a shade dark, so the colour is
+            // lifted, on the ring it is flattened to the paint and the seams are drawn from the
+            // model's own frame: one every 18 degrees about the hub, none across the joints with the
+            // arms; the two long modules that cross the ring along x keep their bake
+            base = base.mul(1.1);
+            const p = positionLocal;
+            const r = p.xz.length();
+            const ring = smoothstep(9.7, 10.4, r).mul(smoothstep(2.6, 3.2, abs(p.z)));
+            const paint = color('#bec5cf');
+            const flat = mix(max(base, paint.mul(0.97)), paint, 0.5);
+            const deg = atan(p.z, p.x).mul(180 / Math.PI).add(360).mod(90);
+            const arc = abs(deg.sub(8.5).mod(18).sub(9)).mul(Math.PI / 180).mul(r);
+            const joint = step(8, deg).mul(step(deg, 82));
+            const aa = fwidth(arc).max(0.01);
+            const line = oneMinus(smoothstep(float(0.03).sub(aa), float(0.03).add(aa), arc)).mul(joint);
+            base = mix(base, mix(flat, color('#3a3d42'), line), ring);
           }
-          generated.colorNode = base;
+          generated.colorNode = base.mul(1.05);
         }
         if (mrMap) {
           const mr = texture(mrMap);
@@ -217,18 +227,18 @@ export class HeliosScene implements WorldScene {
   /** A warm ring of light round the mouth of the docking port and four guide lamps on its rim. */
   private addDockLights(station: THREE.Object3D): void {
     const dockLocal = station.getObjectByName('dock')?.position ?? v(0, 0, 9.7);
-    const mouth = dockLocal.clone().add(v(0, 0, -1.75));
+    const mouth = dockLocal.clone().add(v(0, 0, -1.7));
     const ring = new THREE.MeshBasicNodeMaterial({ transparent: true, depthWrite: false, blending: THREE.AdditiveBlending });
     ring.colorNode = color('#ffcf8a').mul(time.mul(2.2).sin().mul(0.12).add(1).mul(2.2));
     this.bag.add(ring);
-    const torus = new THREE.Mesh(this.bag.add(new THREE.TorusGeometry(2.0, 0.07, 10, 72)), ring);
+    const torus = new THREE.Mesh(this.bag.add(new THREE.TorusGeometry(2.2, 0.07, 10, 72)), ring);
     torus.position.copy(mouth);
     station.add(torus);
     const lamp = this.bag.add(new THREE.SphereGeometry(0.16, 10, 8));
     for (let i = 0; i < 4; i++) {
       const a = i * Math.PI / 2 + Math.PI / 4;
       const mesh = new THREE.Mesh(lamp, ring);
-      mesh.position.copy(mouth).add(v(Math.cos(a) * 2.25, Math.sin(a) * 2.25, 0.15));
+      mesh.position.copy(mouth).add(v(Math.cos(a) * 2.45, Math.sin(a) * 2.45, 0.15));
       station.add(mesh);
     }
   }

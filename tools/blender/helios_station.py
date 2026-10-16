@@ -33,7 +33,6 @@ M = {
     "dock_light": pw.material("dock_light", "#ffd28a", 0.3, emission="#ffcf8a", emission_strength=6.0),
     "window_light": pw.material("window_light", "#ffe7c2", 0.3, emission="#ffd9a0", emission_strength=4.0),
     "buoy_body": pw.material("buoy_body", "#aeb3ba", 0.5, 0.3),
-    "wing_frame": pw.material("wing_frame", "#7c838c", 0.6, 0.4),
 }
 
 station = pw.empty("station", (0, 0, 0))
@@ -43,17 +42,18 @@ shuttle = pw.empty("shuttle", (0, 0, 0))
 # by statue_prepare.py) replace the drawn ones when their files exist; each is imported under its
 # empty, scaled to the size the scene expects (the drawn station spans 32 m, the shuttle 3 m)
 ASSETS = os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "assets", "trellis")
-STATION_GLB = os.path.join(ASSETS, "helios_station.glb")
+STATION_GLB = os.path.join(ASSETS, "helios_station3.glb")
 SHUTTLE_GLB = os.path.join(ASSETS, "helios_shuttle.glb")
 BUOY_GLB = os.path.join(ASSETS, "helios_buoy.glb")
 BUOY_STROBE_Z = 0.52  # the centre of the generated buoy's red lamp, measured on the prepared mesh (its top at 0.61 m)
-# the prepared station has its hub axis upright; tipped by -90 degrees about X its docking end
-# (the raw model's bottom) points to -y, the glTF +z the shuttle approaches along; the prepared
-# shuttle already points its nose to +x, as the drawn one did, so the scene's quarter turn fits
-STATION_SCALE, STATION_YAW, STATION_ROLL = 1.0, 0.0, -math.pi / 2
+# the prepared station has its hub axis upright; tipped by +90 degrees about X its docking end
+# (the collar on the hub's dome, the raw model's top) points to -y, the glTF +z the shuttle
+# approaches along; the prepared shuttle already points its nose to +x, as the drawn one did, so
+# the scene's quarter turn fits
+STATION_SCALE, STATION_YAW, STATION_ROLL = 1.0, 0.0, math.pi / 2
 SHUTTLE_SCALE, SHUTTLE_YAW, SHUTTLE_ROLL = 1.0, 0.0, 0.0
-STATION_SHIFT = (0.18, 0.71, 0.0)  # the prepared station's hub axis, brought onto the origin
-DOCK = (0.0, -9.7, 0.0)  # where the shuttle's centre sits when docked at the hub's end, on its axis (Blender axes: -y is the glTF +z)
+STATION_SHIFT = (-0.10, 0.0, 0.0)  # the prepared station's hub axis, brought onto the origin
+DOCK = (0.0, -4.6, 0.0)  # where the shuttle's centre sits when docked at the hub's collar, on its axis (Blender axes: -y is the glTF +z)
 
 
 def place_generated(path, parent, name, scale, yaw, roll, shift=(0.0, 0.0, 0.0)):
@@ -258,109 +258,12 @@ def build_shuttle():
 
 
 
-def trim_radius(name, r_max):
-    """Cuts everything farther than `r_max` from the hub axis (local z) off a generated mesh: the
-    solar wings TRELLIS bends and doubles go, and clean drawn ones take their place."""
-    o = bpy.data.objects[name]
-    bm = bmesh.new()
-    bm.from_mesh(o.data)
-    doomed = [v for v in bm.verts if math.hypot(v.co.x, v.co.y) > r_max]
-    bmesh.ops.delete(bm, geom=doomed, context="VERTS")
-    # what the cut leaves of the old solar panels are flat plates (a hand thick, metres across, out
-    # by the ring); the mesh comes split into patches along its texture seams, so each patch is
-    # judged on its own: a thin, wide patch away from the hub is panel and goes
-    bm.verts.ensure_lookup_table()
-    seen = set()
-    doomed_flat = []
-    for start in bm.verts:
-        if start.index in seen:
-            continue
-        stack = [start]
-        seen.add(start.index)
-        comp = []
-        while stack:
-            v = stack.pop()
-            comp.append(v)
-            for e in v.link_edges:
-                w = e.other_vert(v)
-                if w.index not in seen:
-                    seen.add(w.index)
-                    stack.append(w)
-        xs = [v.co.x for v in comp]
-        ys = [v.co.y for v in comp]
-        zs = [v.co.z for v in comp]
-        thick = max(zs) - min(zs)
-        wide = max(max(xs) - min(xs), max(ys) - min(ys))
-        cx, cy = sum(xs) / len(xs), sum(ys) / len(ys)
-        r = math.hypot(cx, cy)
-        dims = sorted((max(xs) - min(xs), max(ys) - min(ys), thick))
-        off_axis = abs(cy) > 0.34 * r  # more than 20 degrees off the x axis, where the arms and masts run
-        mean_z = sum(zs) / len(zs)
-        in_panel_plane = -1.35 < mean_z < -0.7  # the old panels lay a metre below the hub's middle
-        if r > 6.0 and ((thick < 0.3 and wide > 2.5) or (off_axis and dims[1] < 0.7 and dims[2] > 2.5) or (off_axis and in_panel_plane and thick < 0.6)):
-            # a flat plate, a long thin bar away from the arms, or any thin piece left in the plane
-            # of the old panels: what remains of them and of their frames
-            doomed_flat.extend(comp)
-    bmesh.ops.delete(bm, geom=doomed_flat, context="VERTS")
-    bm.to_mesh(o.data)
-    bm.free()
-    print(f"[helios] trimmed {len(doomed)} verts beyond {r_max} m and {len(doomed_flat)} verts of flat panel plates from {name}")
-
-
-def rolled(x, y, z):
-    """A point of the generated station's own frame (hub axis z) in the station empty's frame,
-    where the model sits rolled by -90 degrees about X."""
-    return (x, z, -y)
-
-
-def solar_wings(r0, r1):
-    """Two opposite wings on the ring's axis of symmetry: a lattice mast from the ring's rim out to
-    r1 with twin arrays either side, facing the approach, like the drawn station's arrays."""
-    bm_mast = bmesh.new()
-    bm_panel = bmesh.new()
-    uv = bm_panel.loops.layers.uv.new("UVMap")
-    bm_frame = bmesh.new()
-    for sx in (1, -1):
-        a, b = Vector(rolled(sx * r0, 0, 0)), Vector(rolled(sx * r1, 0, 0))
-        for (dy, dz) in ((0.35, 0.35), (0.35, -0.35), (-0.35, 0.35), (-0.35, -0.35)):
-            cylinder_between(bm_mast, Vector(rolled(sx * r0, dy, dz)), Vector(rolled(sx * r1, dy, dz)), 0.07, 6)
-        steps = int((r1 - r0) / 1.5)
-        for k in range(steps + 1):
-            x = sx * (r0 + k * (r1 - r0) / steps)
-            corners = [Vector(rolled(x, 0.35, 0.35)), Vector(rolled(x, 0.35, -0.35)), Vector(rolled(x, -0.35, -0.35)), Vector(rolled(x, -0.35, 0.35))]
-            for i in range(4):
-                cylinder_between(bm_mast, corners[i], corners[(i + 1) % 4], 0.045, 5)
-        for sy in (1, -1):
-            # a panel 3.4 m across lying in the ring plane, its cells facing the approach
-            x0, x1 = sx * (r0 + 0.6), sx * (r1 - 0.3)
-            y0, y1 = sy * 0.7, sy * 4.1
-            grid = bmesh.ops.create_grid(bm_panel, x_segments=1, y_segments=1, size=0.5, calc_uvs=True)
-            verts = grid["verts"]
-            bmesh.ops.scale(bm_panel, vec=Vector((abs(x1 - x0), abs(y1 - y0), 1)), verts=verts)
-            bmesh.ops.translate(bm_panel, verts=verts, vec=Vector(((x0 + x1) / 2, (y0 + y1) / 2, 0)))
-            # the ring plane is raw z = 0: the grid is built in raw space and rolled afterwards
-            for v in verts:
-                v.co = Vector(rolled(v.co.x, v.co.y, v.co.z))
-            # a frame of truss round each panel and the yoke to the mast
-            for (ax, ay, bx, by) in ((x0, y0, x1, y0), (x1, y0, x1, y1), (x1, y1, x0, y1), (x0, y1, x0, y0)):
-                cylinder_between(bm_frame, Vector(rolled(ax, ay, 0)), Vector(rolled(bx, by, 0)), 0.06, 6)
-            for k in range(3):
-                x = x0 + (x1 - x0) * (k + 0.5) / 3
-                cylinder_between(bm_frame, Vector(rolled(x, sy * 0.35, 0)), Vector(rolled(x, y0, 0)), 0.05, 6)
-    bmesh.ops.recalc_face_normals(bm_panel, faces=bm_panel.faces[:])
-    obj("station_wing_masts", bm_mast, "wing_frame", station)
-    obj("station_wing_frames", bm_frame, "wing_frame", station)
-    obj("station_wing_panels", bm_panel, "solar", station)
-
-
 if os.path.exists(STATION_GLB):
-    # the hub's axis sits 0.18 m and 0.71 m off the prepared mesh's origin (measured on the docking end):
-    # the mesh is shifted so the wheel turns about its hub and the port stays put under its lights
+    # the hub's axis sits 0.1 m off the prepared mesh's origin (the dome's port is 0.2 m off, the
+    # hub core and the collar on it, so the mesh is shifted half-way): the mesh is shifted so the wheel turns about its hub and the port stays
+    # put under its lights; the plain-hull station keeps everything TRELLIS made (ring, two long
+    # modules crossing it with ports at their ends, two arrays, hub with its domed collar)
     place_generated(STATION_GLB, station, "station_generated", STATION_SCALE, STATION_YAW, STATION_ROLL, shift=STATION_SHIFT)
-    # the generated wheel keeps its ring (outer rim at 12 m) and hub; its solar wings are cut
-    # away and drawn again as straight arrays on lattice masts
-    trim_radius("station_generated", 12.3)
-    solar_wings(11.6, 21.5)
 else:
     build_station()
 if os.path.exists(SHUTTLE_GLB):

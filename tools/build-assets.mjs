@@ -60,7 +60,7 @@ const ASSETS = [
     out: 'public/models/helios/station.glb',
     budgetKB: 18000,
     textureSize: 4096,
-    sharpenGenerated: true,
+    sharpenGenerated: ['shuttle_tex', 'buoy_tex'],
     keepNodes: true,
   },
   {
@@ -146,9 +146,10 @@ for (const asset of selected) {
   // textures at runtime (the TERRA monitors), so both survive pruning.
   transforms.push(weld(), prune({ keepLeaves: true, keepAttributes: true }));
   if (asset.sharpenGenerated) {
-    // the colour maps TRELLIS.2 bakes come back soft: an unsharp mask on the generated materials' base colour
+    // the colour maps TRELLIS.2 bakes come back soft: an unsharp mask on the base colour of the
+    // generated materials named here (not the station's, whose fuzzy seams it only haloes)
     for (const material of document.getRoot().listMaterials()) {
-      if (!material.getName().endsWith('_tex')) continue;
+      if (!asset.sharpenGenerated.includes(material.getName())) continue;
       const tex = material.getBaseColorTexture();
       const image = tex?.getImage();
       if (!tex || !image) continue;

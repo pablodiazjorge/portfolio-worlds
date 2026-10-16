@@ -31,16 +31,25 @@ not committed. The museum script places each asset when its file exists with
   and 4K textures (generate-prop-hd.sh, 213 s); prepared 3.3 m long with its nose to +X and its origin at
   the centre (`--anchor centre --yaw 90`), the landing gear the picture insisted on cut away under the belly
   (`--cut-below 0.19`), 180k faces, 4K colour and 2K metallic-roughness (7.7 MB); the asset pipeline sharpens
-  the colour map before compressing it (`sharpenGenerated`) and the scene samples it with full anisotropy and adds
+  the colour map before compressing it (`sharpenGenerated` names its material and the buoy's; the station's
+  bake only gains haloes from it) and the scene samples it with full anisotropy and adds
   five glowing discs on the nozzles measured on a rear orthographic render.
-- `helios_station.glb`: the orbital station, from `_docs-internal/reference/helios/station-8-sq.png` (a wheel
-  on four spokes with modules on the hub and four solar wings). 1536 cascade, seed 7, a 360k-face target and
-  4K textures (160 s); prepared 34 m across with its origin at the centre and its hub axis upright, 300k faces,
-  4K colour and 2K metallic-roughness (12.9 MB); `helios_station.py` shifts it onto its hub's true axis
-  (measured at the docking end, 0.18 and 0.71 m off the mesh origin), tips it so the hub's end faces the
-  approach and marks the docking point with the empty `dock`, and the scene turns the whole wheel slowly about
-  its hub. The first, lighter generations (120k-face target, 50k and 100k faces kept, 2K colour) were replaced
-  by these at the user's request.
+- `helios_station3.glb`: the orbital station, from `_docs-internal/reference/helios/station-plain-2.png`
+  (Qwen-Image-2512, the picture the user chose among those asked for with a plain hull: a smooth white
+  torus, two long modules crossing it along one axis with docking ports at their ends, two arrays on the
+  other axis and a hub with a domed docking collar on top; Qwen still drew a few panel lines on the ring).
+  1536 cascade, seed 7, a 360k-face target and 4K textures (`station-pipeline.sh`, 230 s); prepared 34 m
+  across with its origin at the centre and its hub axis upright, 300k faces, 4K colour and 2K
+  metallic-roughness (12.0 MB); `helios_station.py` shifts it 0.1 m onto its hub's axis, tips it so the
+  dome's collar faces the approach and marks the docking point with the empty `dock`; the scene turns the
+  whole wheel slowly about its hub, lifts the bake a tenth (it comes back a shade dark), flattens the
+  ring's colour to the paint and draws its seams itself, one every 18 degrees and none across the joints
+  with the arms, because TRELLIS bakes a picture's thin panel lines as wide, fuzzy bands (audit in
+  `_docs-internal/process/helios/2026-10-15-auditoria-estacion-lisa.md`); the modules keep their bake. It
+  replaces `helios_station.glb`, the wheel on four spokes from `station-8-sq.png` whose bent solar wings
+  had to be cut off and drawn again, removed from the repository with it; an intermediate smooth station
+  from `station-smooth-1.png` (a torus on two spokes with a hub cylinder and antennas, `helios_station2`)
+  was placed, audited and set aside for this one.
 - `helios_buoy.glb`: the navigation buoy of the route, from `_docs-internal/reference/helios/buoy-1.png`
   (Qwen-Image-2512, one picture as the user asked: a white octagonal body with a red beacon on a mast, two
   solar panels and antennas). 1536 cascade, seed 7, 150k-face target and 4K textures (363 s); prepared 1.6 m
@@ -48,10 +57,7 @@ not committed. The museum script places each asset when its file exists with
   script places it as the template `buoy` with a drawn strobe sphere on its lamp (0.52 m up), and the scene
   clones it beside the five waypoints with the strobe flashing on a material of its own.
 - The alternatives generated at the same time (`shuttle-11`, `station-2`) were prepared and compared on
-  renders but not kept. The station's own solar wings, which TRELLIS bends, doubles and leaves untextured
-  on the back, are cut off by `helios_station.py` (everything beyond 12.3 m of the hub axis, then every
-  thin plate or bar left in the panels' plane, judged patch by patch because the mesh comes split along
-  its texture seams) and drawn again as straight arrays on lattice masts.
+  renders but not kept.
 
 Face budgets were chosen on close-ups of the raw meshes decimated to several counts (sheets in
 `_docs-internal/process/atrium/2026-10-15-aplique-decimado-*.jpg`): the sconce's scrollwork is
