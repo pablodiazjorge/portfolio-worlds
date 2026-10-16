@@ -2,17 +2,16 @@
 
 [Versión en español](README.es.md)
 
-The portfolio of Pablo Díaz-Jorge told five ways. Every world holds the same content (about, experience, projects and contact) and walks you through it with a different 3D scene, rendered with three.js on WebGPU and falling back to WebGL 2 where WebGPU is not available.
+The portfolio of Pablo Díaz-Jorge told four ways. Every world holds the same content (about, experience, projects and contact) and walks you through it with a different 3D scene, rendered with three.js on WebGPU and falling back to WebGL 2 where WebGPU is not available.
 
 | Key | World | How you move through it |
 | --- | --- | --- |
 | 1 | Atlas | Scroll flies the camera up an alpine route at dawn; one camp per job, projects from the ridge, contact at the summit observatory. |
 | 2 | Aeris | A drone in a product studio comes apart into five layers, one per job, each linked to its text by a callout line. |
-| 3 | Terra | A house builds itself from the blueprint, one construction phase per job, then opens like a dollhouse so the studio screens can show the projects. |
-| 4 | Helios | A shuttle leaves a procedural planet, flies through one gate per job and docks at a space station, with live telemetry. |
-| 5 | Atrium | A museum you walk through with a robot: paintings are projects, lit panels are jobs, and a gallery guide walks you to any piece. |
+| 3 | Helios | A shuttle leaves a procedural planet, flies through one gate per job and docks at a space station, with live telemetry. |
+| 4 | Atrium | A museum you walk through with a robot: paintings are projects, lit panels are jobs, and a gallery guide walks you to any piece. |
 
-Keys 1 to 5 switch worlds from anywhere and 0 returns to the hub. Every page exists in English (`/atlas`) and Spanish (`/es/atlas`), prerendered with its own title, description, Open Graph image and hreflang links.
+Keys 1 to 4 switch worlds from anywhere and 0 returns to the hub. Every page exists in English (`/atlas`) and Spanish (`/es/atlas`), prerendered with its own title, description, Open Graph image and hreflang links.
 
 ## Stack
 
@@ -43,7 +42,6 @@ Each model is a deterministic Python script in `tools/blender/` that builds the 
 | --- | --- | --- |
 | Atlas valley | 470 KB | 1600 KB |
 | Aeris drone | 84 KB | 900 KB |
-| Terra house | 94 KB | 900 KB |
 | Helios station | 88 KB | 900 KB |
 | Atrium museum | 74 KB | 900 KB |
 | Atrium robot | 216 KB | 500 KB |

@@ -6,7 +6,7 @@ export const UI_EN = {
   dock: {
     label: 'Worlds',
     home: 'All worlds',
-    hint: 'Keys 1 to 5 switch worlds, 0 goes back to all worlds.',
+    hint: 'Keys 1 to 4 switch worlds, 0 goes back to all worlds.',
   },
   loading: 'Loading',
   fallback: 'The 3D scene could not start on this device. The whole portfolio is still here to read.',
@@ -48,17 +48,6 @@ export const UI_EN = {
     projectsLead: 'Everything I have shipped, newest first. Open any card for the full story and the stack.',
     contactLead: 'Reach me on LinkedIn or GitHub about a role, a project or an idea.',
   },
-  terra: {
-    start: 'Start building',
-    phase: 'Phase',
-    phases: ['Foundation', 'Structure', 'Upper floor', 'Roof and glazing', 'Finishes and garden'],
-    site: 'Site plan',
-    sheet: 'Sheet',
-    drawing: 'Drawing',
-    project: 'Project',
-    projectsLead: 'The studio upstairs is where the work happens. As you go through the list, the screens show each project.',
-    contactLead: 'The lights are on and there is room for one more project. Write to me about a role or an idea.',
-  },
   helios: {
     start: 'Launch',
     waypoint: 'Waypoint',
@@ -85,7 +74,7 @@ export const UI_EN = {
     standUp: 'Stand up',
   },
   hub: {
-    title: 'One portfolio, five worlds',
+    title: 'One portfolio, four worlds',
     lead: 'Every world tells the same story: who I am, where I have worked, what I have built and how to reach me. Only the way you walk through it changes.',
     choose: 'Choose a world',
     enter: 'Enter',
@@ -101,11 +90,6 @@ export const UI_EN = {
       name: 'Aeris',
       tagline: 'A holographic drone crossing a dark studio, past the computer where it all began.',
       seo: 'Aeris: the portfolio of Pablo Díaz-Jorge as a holographic drone that flies from stop to stop across a dark studio.',
-    },
-    terra: {
-      name: 'Terra',
-      tagline: 'A house that builds itself as you scroll, from blueprint to night.',
-      seo: 'Terra: the portfolio of Pablo Díaz-Jorge as a house that builds itself from the blueprint up.',
     },
     helios: {
       name: 'Helios',

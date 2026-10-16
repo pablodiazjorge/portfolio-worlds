@@ -48,13 +48,6 @@ const ASSETS = [
     keepNodes: true,
   },
   {
-    name: 'terra-house',
-    script: 'terra_house.py',
-    out: 'public/models/terra/house.glb',
-    budgetKB: 900,
-    keepNodes: true,
-  },
-  {
     name: 'helios-station',
     script: 'helios_station.py',
     out: 'public/models/helios/station.glb',
@@ -143,7 +136,7 @@ for (const asset of selected) {
   if (asset.stripNormals) transforms.push(stripNormals(asset.stripNormals));
   if (!asset.keepNodes) transforms.push(instance({ min: 4 }), flatten({ cleanup: false }));
   // Empty nodes are camera anchors and markers read by the scenes, and some UVs only receive
-  // textures at runtime (the TERRA monitors), so both survive pruning.
+  // textures at runtime, so both survive pruning.
   transforms.push(weld(), prune({ keepLeaves: true, keepAttributes: true }));
   if (asset.sharpenGenerated) {
     // the colour maps TRELLIS.2 bakes come back soft: an unsharp mask on the base colour of the

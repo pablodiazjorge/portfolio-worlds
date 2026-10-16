@@ -8,7 +8,7 @@ export const UI_ES: UiDict = {
   dock: {
     label: 'Mundos',
     home: 'Todos los mundos',
-    hint: 'Las teclas del 1 al 5 cambian de mundo y el 0 vuelve a todos los mundos.',
+    hint: 'Las teclas del 1 al 4 cambian de mundo y el 0 vuelve a todos los mundos.',
   },
   loading: 'Cargando',
   fallback: 'La escena 3D no ha podido arrancar en este dispositivo. Todo el portfolio sigue aquí para leerlo.',
@@ -50,17 +50,6 @@ export const UI_ES: UiDict = {
     projectsLead: 'Todo lo que he publicado, de lo más reciente a lo más antiguo. Abre cualquier tarjeta para ver la historia completa y las tecnologías.',
     contactLead: 'Escríbeme por LinkedIn o GitHub sobre un puesto, un proyecto o una idea.',
   },
-  terra: {
-    start: 'Empezar la obra',
-    phase: 'Fase',
-    phases: ['Cimentación', 'Estructura', 'Planta alta', 'Cubierta y acristalamiento', 'Acabados y jardín'],
-    site: 'Plano de situación',
-    sheet: 'Lámina',
-    drawing: 'Plano',
-    project: 'Proyecto',
-    projectsLead: 'El estudio de arriba es donde se trabaja. Mientras recorres la lista, las pantallas muestran cada proyecto.',
-    contactLead: 'Las luces están encendidas y cabe un proyecto más. Escríbeme sobre un puesto o una idea.',
-  },
   helios: {
     start: 'Despegar',
     waypoint: 'Punto de paso',
@@ -87,7 +76,7 @@ export const UI_ES: UiDict = {
     standUp: 'Levantarse',
   },
   hub: {
-    title: 'Un portfolio, cinco mundos',
+    title: 'Un portfolio, cuatro mundos',
     lead: 'Cada mundo cuenta la misma historia: quién soy, dónde he trabajado, qué he construido y cómo contactar conmigo. Solo cambia la forma de recorrerla.',
     choose: 'Elige un mundo',
     enter: 'Entrar',
@@ -103,11 +92,6 @@ export const UI_ES: UiDict = {
       name: 'Aeris',
       tagline: 'Un dron holográfico que cruza un estudio oscuro, junto al ordenador donde empezó todo.',
       seo: 'Aeris: el portfolio de Pablo Díaz-Jorge como un dron holográfico que vuela de parada en parada por un estudio oscuro.',
-    },
-    terra: {
-      name: 'Terra',
-      tagline: 'Una casa que se construye mientras bajas, del plano a la noche.',
-      seo: 'Terra: el portfolio de Pablo Díaz-Jorge como una casa que se construye desde el plano.',
     },
     helios: {
       name: 'Helios',

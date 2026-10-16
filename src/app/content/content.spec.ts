@@ -14,11 +14,6 @@ describe('portfolio content', () => {
     PORTFOLIO_ES.projects.forEach((project, i) => expect(project.tagline).not.toBe(PORTFOLIO_EN.projects[i].tagline));
   });
 
-  it('keeps one build phase name per job in Terra', () => {
-    expect(UI_EN.terra.phases.length).toBe(PORTFOLIO_EN.experience.length);
-    expect(UI_ES.terra.phases.length).toBe(PORTFOLIO_ES.experience.length);
-  });
-
   it('avoids the em dash in the Spanish copy', () => {
     expect(JSON.stringify(PORTFOLIO_ES)).not.toContain('—');
     expect(JSON.stringify(UI_ES)).not.toContain('—');

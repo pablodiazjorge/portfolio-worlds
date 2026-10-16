@@ -1,6 +1,6 @@
 import { Type } from '@angular/core';
 
-export type WorldId = 'atlas' | 'aeris' | 'terra' | 'helios' | 'atrium';
+export type WorldId = 'atlas' | 'aeris' | 'helios' | 'atrium';
 export type Lang = 'en' | 'es';
 
 export interface WorldDef {
@@ -34,16 +34,8 @@ export const WORLDS: readonly WorldDef[] = [
     page: () => import('../landings/aeris/aeris.page').then((m) => m.AerisPage),
   },
   {
-    id: 'terra',
-    key: '3',
-    background: '#173a6b',
-    swatch: ['#1d4f91', '#d9a46c'],
-    assets: ['models/terra/house.glb'],
-    page: () => import('../landings/terra/terra.page').then((m) => m.TerraPage),
-  },
-  {
     id: 'helios',
-    key: '4',
+    key: '3',
     background: '#03050b',
     swatch: ['#071226', '#ffcf8a'],
     assets: ['models/helios/station.glb'],
@@ -51,7 +43,7 @@ export const WORLDS: readonly WorldDef[] = [
   },
   {
     id: 'atrium',
-    key: '5',
+    key: '4',
     background: '#1f3a33',
     swatch: ['#24443b', '#c9a465'],
     assets: ['models/atrium/museum.glb', 'models/atrium/robot.glb'],

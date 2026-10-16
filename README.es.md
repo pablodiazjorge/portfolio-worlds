@@ -2,17 +2,16 @@
 
 [English version](README.md)
 
-El portfolio de Pablo Díaz-Jorge contado de cinco formas. Cada mundo tiene el mismo contenido (sobre mí, experiencia, proyectos y contacto) y lo recorre con una escena 3D distinta, renderizada con three.js sobre WebGPU y con WebGL 2 como respaldo donde WebGPU no está disponible.
+El portfolio de Pablo Díaz-Jorge contado de cuatro formas. Cada mundo tiene el mismo contenido (sobre mí, experiencia, proyectos y contacto) y lo recorre con una escena 3D distinta, renderizada con three.js sobre WebGPU y con WebGL 2 como respaldo donde WebGPU no está disponible.
 
 | Tecla | Mundo | Cómo se recorre |
 | --- | --- | --- |
 | 1 | Atlas | El scroll lleva la cámara por una ruta alpina al amanecer: un campamento por trabajo, los proyectos desde la cresta y el contacto en el observatorio de la cumbre. |
 | 2 | Aeris | Un dron en un estudio de producto se despieza en cinco capas, una por trabajo, unidas a su texto con una línea de anotación. |
-| 3 | Terra | Una casa se construye desde el plano, una fase de obra por trabajo, y se abre como una casa de muñecas para que las pantallas del estudio muestren los proyectos. |
-| 4 | Helios | Una lanzadera sale de un planeta procedural, cruza un anillo por trabajo y atraca en una estación espacial, con telemetría en vivo. |
-| 5 | Atrium | Un museo que recorres con un robot: los cuadros son proyectos, los paneles iluminados son trabajos y una guía te lleva a cualquier pieza. |
+| 3 | Helios | Una lanzadera sale de un planeta procedural, cruza un anillo por trabajo y atraca en una estación espacial, con telemetría en vivo. |
+| 4 | Atrium | Un museo que recorres con un robot: los cuadros son proyectos, los paneles iluminados son trabajos y una guía te lleva a cualquier pieza. |
 
-Las teclas del 1 al 5 cambian de mundo desde cualquier página y el 0 vuelve al inicio. Cada página existe en inglés (`/atlas`) y en castellano (`/es/atlas`), prerenderizada con su título, descripción, imagen Open Graph y enlaces hreflang.
+Las teclas del 1 al 4 cambian de mundo desde cualquier página y el 0 vuelve al inicio. Cada página existe en inglés (`/atlas`) y en castellano (`/es/atlas`), prerenderizada con su título, descripción, imagen Open Graph y enlaces hreflang.
 
 ## Tecnologías
 
@@ -43,7 +42,6 @@ Cada modelo es un script de Python determinista en `tools/blender/` que construy
 | --- | --- | --- |
 | Valle de Atlas | 470 KB | 1600 KB |
 | Dron de Aeris | 84 KB | 900 KB |
-| Casa de Terra | 94 KB | 900 KB |
 | Estación de Helios | 88 KB | 900 KB |
 | Museo de Atrium | 74 KB | 900 KB |
 | Robot de Atrium | 216 KB | 500 KB |
