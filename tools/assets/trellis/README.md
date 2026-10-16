@@ -34,29 +34,16 @@ not committed. The museum script places each asset when its file exists with
   the colour map before compressing it (`sharpenGenerated` names its material and the buoy's; the station's
   bake only gains haloes from it) and the scene samples it with full anisotropy and adds
   five glowing discs on the nozzles measured on a rear orthographic render.
-- `helios_station3.glb`: the orbital station, from `_docs-internal/reference/helios/station-plain-2.png`
-  (Qwen-Image-2512, the picture the user chose among those asked for with a plain hull: a smooth white
-  torus, two long modules crossing it along one axis with docking ports at their ends, two arrays on the
-  other axis and a hub with a domed docking collar on top; Qwen still drew a few panel lines on the ring).
-  1536 cascade, seed 7, a 360k-face target and 4K textures (`station-pipeline.sh`, 230 s); prepared 34 m
-  across with its origin at the centre and its hub axis upright, 300k faces, 4K colour and 2K
-  metallic-roughness (12.0 MB); `helios_station.py` shifts it 0.1 m onto its hub's axis, tips it so the
-  dome's collar faces the approach and marks the docking point with the empty `dock`; the scene turns the
-  whole wheel slowly about its hub, lifts the bake a tenth (it comes back a shade dark), flattens the
-  ring's colour to the paint and draws its seams itself, one every 18 degrees and none across the joints
-  with the arms, because TRELLIS bakes a picture's thin panel lines as wide, fuzzy bands (audit in
-  `_docs-internal/process/helios/2026-10-15-auditoria-estacion-lisa.md`); the modules keep their bake. Its
-  two arrays, unequal and askew, are cut away with their masts and drawn again as two identical panels
-  on masts from the hub to the ring, and a hatch closes the port; the debris the cut leaves by the ring
-  (sockets, a plate and a bar, rods on the outer edge, the yoke by the hub) goes by rules that pin each
-  piece down by colour, size and pocket together, because the ring's skin comes in thousands of small
-  patches, its section is not uniform and its inner equator is baked black (broader rules opened holes,
-  caught by a coverage check and by renders of the joints from inside the ring; see the process report,
-  pass 14); the masts run on to 12.3 m, into the inner wall, which is recessed to 11.5 m on that axis, and end in a drawn foot that covers the old mount. It
-  replaces `helios_station.glb`, the wheel on four spokes from `station-8-sq.png` whose bent solar wings
-  had to be cut off and drawn again, removed from the repository with it; an intermediate smooth station
-  from `station-smooth-1.png` (a torus on two spokes with a hub cylinder and antennas, `helios_station2`)
-  was placed, audited and set aside for this one.
+- The orbital station is not generated any more: `tools/blender/helios_station.py` draws it from
+  primitives after the first picture of the series (`_docs-internal/reference/helios/station-8.png`, a
+  wheel on four spokes with tank modules, a hub tower, a docking tube and two solar wings on trusses),
+  modelled live in Blender through its MCP add-on and checked against the picture on headless renders.
+  Three generated stations came before it and left the repository with their replacement: the wheel of
+  `station-8-sq.png`, whose bent wings had to be cut off and drawn again; the smooth torus of
+  `station-smooth-1.png` (`helios_station2`); and the plain hull of `station-plain-2.png`
+  (`helios_station3`), whose arrays, debris and docking mouth took a long run of cutting rules (process
+  report, passes 10 to 16). TRELLIS bakes a picture's thin panel lines as wide, fuzzy bands and its skin
+  comes in thousands of small patches that no rule tells from debris, which is why a drawn hull won.
 - `helios_buoy.glb`: the navigation buoy of the route, from `_docs-internal/reference/helios/buoy-1.png`
   (Qwen-Image-2512, one picture as the user asked: a white octagonal body with a red beacon on a mast, two
   solar panels and antennas). 1536 cascade, seed 7, 150k-face target and 4K textures (363 s); prepared 1.6 m

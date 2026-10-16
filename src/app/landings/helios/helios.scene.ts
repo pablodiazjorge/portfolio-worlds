@@ -8,6 +8,7 @@ import {
   fwidth,
   hash,
   max,
+  min,
   mix,
   mx_fractal_noise_float,
   normalize,
@@ -124,7 +125,7 @@ export class HeliosScene implements WorldScene {
     const station = root.getObjectByName('station');
     const shuttle = root.getObjectByName('shuttle');
     this.ring = root.getObjectByName('ring_pivot') ?? null;
-    this.wheel = root.getObjectByName('station_generated') ?? null;
+    this.wheel = root.getObjectByName('station_body') ?? null;
     if (station) {
       station.position.copy(STATION);
       station.rotation.y = 0.35;
@@ -149,7 +150,7 @@ export class HeliosScene implements WorldScene {
     const lib = new Map<string, THREE.Material>();
     const std = (name: string, params: ConstructorParameters<typeof THREE.MeshStandardNodeMaterial>[0]) =>
       lib.set(name, new THREE.MeshStandardNodeMaterial(params));
-    std('hull', { color: '#e6e7ea', roughness: 0.42, metalness: 0.1 });
+    lib.set('hull', this.hullMaterial());
     std('truss', { color: '#9aa1aa', roughness: 0.38, metalness: 0.85 });
     std('radiator', { color: '#f2f2f0', roughness: 0.65 });
     std('glass', { color: '#0a1220', roughness: 0.05, metalness: 0.4 });
@@ -174,6 +175,7 @@ export class HeliosScene implements WorldScene {
     glow('beacon_green', '#34c759', 1.6);
     glow('dock_light', '#ffcf8a', 4);
     glow('window_light', '#ffd9a0', 2.5);
+    lib.set('dock_field', this.fieldMaterial());
 
     root.traverse((o) => {
       const mesh = o as THREE.Mesh;
@@ -187,26 +189,7 @@ export class HeliosScene implements WorldScene {
         for (const map of [baked, mrMap]) if (map) map.anisotropy = 16;
         const generated = new THREE.MeshStandardNodeMaterial({ roughness: 0.6, metalness: 0.2 });
         if (baked) {
-          let base = texture(baked).rgb;
-          if (source.name === 'station_tex') {
-            // the bake draws the ring's panel seams as wide, fuzzy bands (TRELLIS reads the picture
-            // at a scale where its 6 cm lines vanish) and comes back a shade dark, so the colour is
-            // lifted, on the ring it is flattened to the paint and the seams are drawn from the
-            // model's own frame: one every 18 degrees about the hub, none across the joints with the
-            // arms; the two long modules that cross the ring along x keep their bake
-            base = base.mul(1.1);
-            const p = positionLocal;
-            const r = p.xz.length();
-            const ring = smoothstep(9.7, 10.4, r).mul(smoothstep(2.6, 3.2, abs(p.z)));
-            const paint = color('#bec5cf');
-            const flat = mix(max(base, paint.mul(0.97)), paint, 0.5);
-            const deg = atan(p.z, p.x).mul(180 / Math.PI).add(360).mod(90);
-            const arc = abs(deg.sub(8.5).mod(18).sub(9)).mul(Math.PI / 180).mul(r);
-            const joint = step(8, deg).mul(step(deg, 82));
-            const aa = fwidth(arc).max(0.01);
-            const line = oneMinus(smoothstep(float(0.03).sub(aa), float(0.03).add(aa), arc)).mul(joint);
-            base = mix(base, mix(flat, color('#3a3d42'), line), ring);
-          }
+          const base = texture(baked).rgb;
           generated.colorNode = base.mul(1.05);
         }
         if (mrMap) {
@@ -224,21 +207,70 @@ export class HeliosScene implements WorldScene {
     lib.forEach((m) => this.bag.add(m));
   }
 
+  /** The station's hull: painted panels drawn from the model's own frame (the hub axis is local z, the
+   *  ring lies in the x-y plane), with a seam every 7.5 degrees and every 30 degrees of tube on the ring
+   *  and a 1.25 m grid on the hub, the tanks and the tube, a tone of its own per panel, grime along the
+   *  seams and a worn roughness. */
+  private hullMaterial(): THREE.MeshStandardNodeMaterial {
+    const m = new THREE.MeshStandardNodeMaterial({ metalness: 0.12 });
+    const p = positionLocal;
+    const r = p.xy.length();
+    const onRing = smoothstep(9.2, 9.8, r);
+    // the ring: seams along the meridians and around the tube
+    const deg = atan(p.y, p.x).mul(180 / Math.PI).add(360).mod(7.5);
+    const meridian = abs(deg.sub(3.75)).mul(Math.PI / 180).mul(r);
+    const tube = atan(p.z, r.sub(13.0)).mul(180 / Math.PI).add(360).mod(30);
+    const around = abs(tube.sub(15)).mul(Math.PI / 180).mul(1.9);
+    const ringSeam = min(meridian, around);
+    const ringCell = atan(p.y, p.x).mul(180 / Math.PI).add(360).div(7.5).floor().add(atan(p.z, r.sub(13.0)).mul(180 / Math.PI).add(360).div(30).floor().mul(97));
+    // everything else: a grid of plates in the model's frame
+    const g = p.div(1.25);
+    const gf = g.fract().sub(0.5).abs().mul(-1).add(0.5).mul(1.25);
+    const boxSeam = min(min(gf.x, gf.y), gf.z);
+    const boxCell = g.floor();
+    const seamDist = mix(boxSeam, ringSeam, onRing);
+    const cellId = mix(boxCell.x.add(boxCell.y.mul(37)).add(boxCell.z.mul(113)), ringCell, onRing);
+    const aa = fwidth(seamDist).max(0.01);
+    const seam = oneMinus(smoothstep(float(0.025).sub(aa), float(0.025).add(aa), seamDist));
+    const grime = smoothstep(0.0, 0.22, seamDist).mul(0.14).add(0.86);
+    const tone = mix(0.94, 1.04, hash(cellId.add(0.5)));
+    const wear = mx_fractal_noise_float(p.mul(0.9)).mul(0.5).add(0.5);
+    const paint = color('#cfd3d8').mul(tone).mul(grime).mul(wear.mul(0.08).add(0.96));
+    m.colorNode = mix(paint, color('#4a4f57'), seam);
+    m.roughnessNode = wear.mul(0.22).add(0.38).add(seam.mul(0.3));
+    return m;
+  }
+
+  /** The plasma field across the docking port: translucent, rippling and brighter at its rim, so the
+   *  lit corridor shows through it. */
+  private fieldMaterial(): THREE.MeshBasicNodeMaterial {
+    const m = new THREE.MeshBasicNodeMaterial({ transparent: true, depthWrite: false, side: THREE.DoubleSide });
+    const p = positionLocal;
+    const rr = p.xy.length().div(1.46);
+    const ripple = mx_fractal_noise_float(vec3(p.x.mul(1.4), p.y.mul(1.4), time.mul(0.45))).mul(0.5).add(0.5);
+    const swirl = mx_fractal_noise_float(vec3(p.x.mul(0.6).add(time.mul(0.2)), p.y.mul(0.6), time.mul(0.15))).mul(0.5).add(0.5);
+    const rim = smoothstep(0.55, 1.0, rr);
+    const pulse = time.mul(1.4).sin().mul(0.08).add(1);
+    m.colorNode = mix(color('#2f8fff'), color('#c8f0ff'), ripple.mul(0.7).add(swirl.mul(0.3))).mul(rim.mul(1.6).add(1.0)).mul(pulse);
+    m.opacityNode = float(0.22).add(rim.mul(0.5)).add(ripple.mul(0.14));
+    return m;
+  }
+
   /** A warm ring of light round the mouth of the docking port and four guide lamps on its rim. */
   private addDockLights(station: THREE.Object3D): void {
-    const dockLocal = station.getObjectByName('dock')?.position ?? v(0, 0, 9.7);
+    const dockLocal = station.getObjectByName('dock')?.position ?? v(0, 0, 7.1);
     const mouth = dockLocal.clone().add(v(0, 0, -1.7));
     const ring = new THREE.MeshBasicNodeMaterial({ transparent: true, depthWrite: false, blending: THREE.AdditiveBlending });
     ring.colorNode = color('#ffcf8a').mul(time.mul(2.2).sin().mul(0.12).add(1).mul(2.2));
     this.bag.add(ring);
-    const torus = new THREE.Mesh(this.bag.add(new THREE.TorusGeometry(2.2, 0.07, 10, 72)), ring);
+    const torus = new THREE.Mesh(this.bag.add(new THREE.TorusGeometry(2.35, 0.07, 10, 72)), ring);
     torus.position.copy(mouth);
     station.add(torus);
     const lamp = this.bag.add(new THREE.SphereGeometry(0.16, 10, 8));
     for (let i = 0; i < 4; i++) {
       const a = i * Math.PI / 2 + Math.PI / 4;
       const mesh = new THREE.Mesh(lamp, ring);
-      mesh.position.copy(mouth).add(v(Math.cos(a) * 2.45, Math.sin(a) * 2.45, 0.15));
+      mesh.position.copy(mouth).add(v(Math.cos(a) * 2.6, Math.sin(a) * 2.6, 0.15));
       station.add(mesh);
     }
   }
