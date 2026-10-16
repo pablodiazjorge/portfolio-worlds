@@ -1,23 +1,21 @@
 import * as THREE from 'three/webgpu';
 import {
   abs,
-  atan,
   color,
   dot,
   float,
-  fwidth,
   hash,
   max,
-  min,
   mix,
+  mrt,
   mx_fractal_noise_float,
   normalize,
+  normalLocal,
   normalView,
-  oneMinus,
+  output,
   pass,
   pmremTexture,
   positionLocal,
-  positionView,
   positionViewDirection,
   positionWorld,
   positionWorldDirection,
@@ -25,12 +23,21 @@ import {
   step,
   texture,
   time,
+  transformNormalToView,
   uniform,
   uv,
   vec2,
   vec3,
 } from 'three/tsl';
 import { bloom } from 'three/addons/tsl/display/BloomNode.js';
+
+
+/** Marks a material as one the bloom may pick up: lights, glows, the planet and its air. Everything
+ *  else (the hull above all) stays crisp however brightly the sun hits it. */
+function blooms<T extends THREE.NodeMaterial>(material: T): T {
+  material.mrtNode = mrt({ bloomIntensity: float(1) });
+  return material;
+}
 import { RoomEnvironment } from 'three/addons/environments/RoomEnvironment.js';
 import { dequantizeMeshes } from '../../core/assets/dequantize';
 import { loadGltf } from '../../core/assets/gltf';
@@ -167,7 +174,7 @@ export class HeliosScene implements WorldScene {
     lib.set('solar', solar);
 
     const glow = (name: string, hex: string, strength: number) => {
-      const m = new THREE.MeshBasicNodeMaterial();
+      const m = blooms(new THREE.MeshBasicNodeMaterial());
       m.colorNode = color(hex).mul(strength);
       lib.set(name, m);
     };
@@ -208,43 +215,45 @@ export class HeliosScene implements WorldScene {
     lib.forEach((m) => this.bag.add(m));
   }
 
-  /** The station's hull: painted plates drawn from the model's own frame (the hub axis is local z, the
-   *  ring lies in the x-y plane). The relief between the gold bands is modelled, so the shader only adds
-   *  a faint seam down the middle of each drum of the ring and a 2.5 m grid of plates elsewhere, a tone
-   *  of its own per plate, grime along the seams and a worn roughness; the seams fade with distance so
-   *  the hull never reads as ruled paper from afar. */
+  /** The station's hull: the painted steel panels of blue_metal_plate (Poly Haven, CC0) with their seams,
+   *  dropped to a white paint, sampled triplanar in the model's own frame so they turn with the wheel,
+   *  in plates of 2 m; the map's own brightness is normalised by its measured mean, its normals carry
+   *  the seams and its roughness map spans a satin range. */
   private hullMaterial(): THREE.MeshStandardNodeMaterial {
-    const m = new THREE.MeshStandardNodeMaterial({ metalness: 0.12 });
-    const p = positionLocal;
-    const r = p.xy.length();
-    const onRing = smoothstep(9.2, 9.8, r);
-    // the ring: the drums are joined every 22.5 degrees, so one seam halfway along each
-    const deg = atan(p.y, p.x).mul(180 / Math.PI).add(360);
-    const ringSeam = abs(deg.mod(22.5).sub(11.25)).mul(Math.PI / 180).mul(r);
-    const ringCell = deg.div(22.5).floor().add(step(0, p.z).mul(31));
-    // everything else: a grid of plates in the model's frame
-    const g = p.div(2.5);
-    const gf = g.fract().sub(0.5).abs().mul(-1).add(0.5).mul(2.5);
-    const boxSeam = min(min(gf.x, gf.y), gf.z);
-    const boxCell = g.floor();
-    const seamDist = mix(boxSeam, ringSeam, onRing);
-    const cellId = mix(boxCell.x.add(boxCell.y.mul(37)).add(boxCell.z.mul(113)), ringCell, onRing);
-    const aa = fwidth(seamDist).max(0.01);
-    const near = oneMinus(smoothstep(30, 90, positionView.z.negate()));
-    const seam = oneMinus(smoothstep(float(0.02).sub(aa), float(0.02).add(aa), seamDist)).mul(near);
-    const grime = smoothstep(0.0, 0.3, seamDist).mul(0.1).add(0.9);
-    const tone = mix(0.94, 1.03, hash(cellId.add(0.5)));
-    const wear = mx_fractal_noise_float(p.mul(0.9)).mul(0.5).add(0.5);
-    const paint = color('#cbd0d6').mul(tone).mul(grime).mul(wear.mul(0.08).add(0.96));
-    m.colorNode = mix(paint, paint.mul(0.72), seam);
-    m.roughnessNode = wear.mul(0.22).add(0.4).add(seam.mul(0.2));
+    const loader = new THREE.TextureLoader();
+    const load = (kind: string, srgb: boolean) => {
+      const t = this.bag.add(loader.load(`textures/helios/hull-${kind}.webp`));
+      t.wrapS = t.wrapT = THREE.RepeatWrapping;
+      t.anisotropy = 8;
+      if (srgb) t.colorSpace = THREE.SRGBColorSpace;
+      return t;
+    };
+    const diffuse = load('diffuse', true);
+    const normalMap = load('normal', false);
+    const rough = load('rough', false);
+    const q = positionLocal.mul(1 / 2.0);
+    const n = normalLocal.abs();
+    const w = n.div(n.x.add(n.y).add(n.z).add(0.0001));
+    const sample = (map: THREE.Texture) => texture(map, q.zy).rgb.mul(w.x).add(texture(map, q.xz).rgb.mul(w.y)).add(texture(map, q.xy).rgb.mul(w.z));
+    const tx = texture(normalMap, q.zy).rgb.mul(2).sub(1);
+    const ty = texture(normalMap, q.xz).rgb.mul(2).sub(1);
+    const tz = texture(normalMap, q.xy).rgb.mul(2).sub(1);
+    const bump = vec3(0, tx.y, tx.x).mul(w.x).add(vec3(ty.x, 0, ty.y).mul(w.y)).add(vec3(tz.x, tz.y, 0).mul(w.z)).mul(1.2);
+    const m = new THREE.MeshStandardNodeMaterial({ metalness: 0.1 });
+    const lum = dot(sample(diffuse), vec3(0.3, 0.59, 0.11));
+    const meanLinear = Math.pow((60 / 255 + 0.055) / 1.055, 2.4); // the map's mean, measured on the 1K colour map
+    const shade = lum.div(meanLinear).sub(1).mul(0.9).add(1).clamp(0, 1.15);
+    const tint = new THREE.Color('#cfd4da');
+    m.colorNode = vec3(shade).mul(vec3(tint.r, tint.g, tint.b));
+    m.roughnessNode = mix(0.3, 0.8, sample(rough).r);
+    m.normalNode = transformNormalToView(normalLocal.add(bump).normalize());
     return m;
   }
 
   /** The plasma field across the docking port: translucent, rippling and brighter at its rim, so the
    *  lit corridor shows through it. */
   private fieldMaterial(): THREE.MeshBasicNodeMaterial {
-    const m = new THREE.MeshBasicNodeMaterial({ transparent: true, depthWrite: false, side: THREE.DoubleSide });
+    const m = blooms(new THREE.MeshBasicNodeMaterial({ transparent: true, depthWrite: false, side: THREE.DoubleSide }));
     const p = positionLocal;
     const rr = p.xy.length().div(1.46);
     const ripple = mx_fractal_noise_float(vec3(p.x.mul(1.4), p.y.mul(1.4), time.mul(0.45))).mul(0.5).add(0.5);
@@ -260,7 +269,7 @@ export class HeliosScene implements WorldScene {
   private addDockLights(station: THREE.Object3D): void {
     const dockLocal = station.getObjectByName('dock')?.position ?? v(0, 0, 7.1);
     const mouth = dockLocal.clone().add(v(0, 0, -1.7));
-    const ring = new THREE.MeshBasicNodeMaterial({ transparent: true, depthWrite: false, blending: THREE.AdditiveBlending });
+    const ring = blooms(new THREE.MeshBasicNodeMaterial({ transparent: true, depthWrite: false, blending: THREE.AdditiveBlending }));
     ring.colorNode = color('#ffcf8a').mul(time.mul(2.2).sin().mul(0.12).add(1).mul(2.2));
     this.bag.add(ring);
     const torus = new THREE.Mesh(this.bag.add(new THREE.TorusGeometry(2.35, 0.07, 10, 72)), ring);
@@ -279,9 +288,9 @@ export class HeliosScene implements WorldScene {
   private addEngineGlow(shuttle: THREE.Object3D): void {
     const disc = this.bag.add(new THREE.CircleGeometry(0.1, 24));
     const halo = this.bag.add(new THREE.CircleGeometry(0.24, 24));
-    const core = new THREE.MeshBasicNodeMaterial({ transparent: true, depthWrite: false, blending: THREE.AdditiveBlending });
+    const core = blooms(new THREE.MeshBasicNodeMaterial({ transparent: true, depthWrite: false, blending: THREE.AdditiveBlending }));
     core.colorNode = color('#bfe6ff').mul(time.mul(9).sin().mul(0.08).add(1).mul(3.2));
-    const soft = new THREE.MeshBasicNodeMaterial({ transparent: true, depthWrite: false, blending: THREE.AdditiveBlending });
+    const soft = blooms(new THREE.MeshBasicNodeMaterial({ transparent: true, depthWrite: false, blending: THREE.AdditiveBlending }));
     soft.colorNode = color('#5fb6ff').mul(float(1).sub(uv().sub(0.5).length().mul(2)).clamp(0, 1).pow(2).mul(1.4));
     this.bag.add(core);
     this.bag.add(soft);
@@ -341,7 +350,7 @@ export class HeliosScene implements WorldScene {
     const rim = float(1).sub(abs(dot(normalView, positionViewDirection))).pow(3);
     const haze = color('#6fb6ff').mul(rim.mul(smoothstep(-0.25, 0.4, lit)).mul(0.7));
 
-    const material = new THREE.MeshStandardNodeMaterial({ roughness: 0.8 });
+    const material = blooms(new THREE.MeshStandardNodeMaterial({ roughness: 0.8 }));
     // the planet takes almost no light from the studio environment, so its night side stays night
     // (a zero in place of the map switches the whole lighting off, so the map is sampled and scaled)
     if (this.envTexture) material.envNode = pmremTexture(this.envTexture).mul(0.03);
@@ -359,7 +368,7 @@ export class HeliosScene implements WorldScene {
     this.scene.add(this.planet);
 
     const cloudGeometry = this.bag.add(new THREE.SphereGeometry(PLANET_RADIUS + 0.45, 128, 96));
-    const clouds = new THREE.MeshStandardNodeMaterial({ transparent: true, depthWrite: false, roughness: 1 });
+    const clouds = blooms(new THREE.MeshStandardNodeMaterial({ transparent: true, depthWrite: false, roughness: 1 }));
     if (this.envTexture) clouds.envNode = pmremTexture(this.envTexture).mul(0.03);
     clouds.colorNode = color('#ffffff');
     clouds.opacityNode = texture(cloudMap).r.mul(0.95);
@@ -370,7 +379,7 @@ export class HeliosScene implements WorldScene {
     this.scene.add(this.clouds);
 
     const shellGeometry = this.bag.add(new THREE.SphereGeometry(PLANET_RADIUS + 2.6, 128, 96));
-    const shell = new THREE.MeshBasicNodeMaterial({ transparent: true, depthWrite: false, side: THREE.BackSide, blending: THREE.AdditiveBlending });
+    const shell = blooms(new THREE.MeshBasicNodeMaterial({ transparent: true, depthWrite: false, side: THREE.BackSide, blending: THREE.AdditiveBlending }));
     const shellOut = normalize(positionWorld.sub(vec3(PLANET_CENTRE.x, PLANET_CENTRE.y, PLANET_CENTRE.z)));
     const shellLit = smoothstep(-0.35, 0.5, dot(shellOut, this.uSun));
     const edge = float(1).sub(abs(dot(normalView, positionViewDirection))).pow(5.5);
@@ -405,7 +414,7 @@ export class HeliosScene implements WorldScene {
       const buoy = template ? template.clone(true) : new THREE.Group();
       const strobe = buoy.getObjectByName('buoy_strobe') as THREE.Mesh | undefined;
       if (strobe) {
-        const material = new THREE.MeshBasicNodeMaterial();
+        const material = blooms(new THREE.MeshBasicNodeMaterial());
         // a short double flash every 1.4 s, each buoy out of step with the next
         const phase = time.mul(0.72).add(i * 0.37).fract();
         const flash = smoothstep(0.0, 0.03, phase).mul(smoothstep(0.1, 0.05, phase)).add(smoothstep(0.16, 0.19, phase).mul(smoothstep(0.26, 0.21, phase)));
@@ -456,9 +465,13 @@ export class HeliosScene implements WorldScene {
   }
 
   private setupPipeline(): void {
+    // the scene pass also writes a mask of what may bloom (see `blooms`), so the sunlit hull of the
+    // station never burns white while the lights, the glows and the planet keep their halo
     const scenePass = pass(this.scene, this.camera);
+    scenePass.setMRT(mrt({ output, bloomIntensity: float(0) }));
     const sceneColor = scenePass.getTextureNode();
-    const glow = bloom(sceneColor, this.ctx.quality === 'low' ? 0.4 : 0.55, 0.35, 0.92);
+    const mask = scenePass.getTextureNode('bloomIntensity').clamp(0, 1);
+    const glow = bloom(sceneColor.mul(mask), this.ctx.quality === 'low' ? 0.4 : 0.55, 0.35, 0.92);
     this.pipeline = new THREE.RenderPipeline(this.ctx.renderer, sceneColor.add(glow));
     this.bag.defer(() => {
       glow.dispose();
