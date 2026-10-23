@@ -5,7 +5,6 @@
   --font-atlas: 'Fraunces Variable', 'Iowan Old Style', Georgia, serif;
   --font-aeris: 'Space Grotesk Variable', 'Helvetica Neue', ui-sans-serif, sans-serif;
   --font-terminal: 'VT323', 'Courier New', ui-monospace, monospace;
-  --font-terra: 'Syne Variable', 'Arial Narrow', ui-sans-serif, sans-serif;
   --font-helios: 'Michroma', 'Eurostile', ui-sans-serif, sans-serif;
   --font-atrium: 'Cormorant Garamond Variable', Garamond, Georgia, serif;
   --ease-out-quart: cubic-bezier(0.25, 1, 0.5, 1);
@@ -36,11 +35,6 @@ html[data-world='aeris'] {
   --dock-line: rgb(120 200 255 / 0.18);
   --accent: #5ee0ff;
   color-scheme: dark;
-}
-
-html[data-world='terra'] {
-  --page-bg: #173a6b;
-  --accent: #e3b07a;
 }
 
 html[data-world='helios'] {

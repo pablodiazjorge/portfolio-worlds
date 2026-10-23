@@ -166,17 +166,6 @@
   letter-spacing: -0.04em;
 }
 
-.slice[data-world='terra'] {
-  --slice-bg:
-    repeating-linear-gradient(0deg, rgb(255 255 255 / 0.07) 0 1px, transparent 1px 28px),
-    repeating-linear-gradient(90deg, rgb(255 255 255 / 0.07) 0 1px, transparent 1px 28px), #1b4887;
-}
-
-.slice[data-world='terra'] .slice-name {
-  font-family: var(--font-terra);
-  font-weight: 800;
-}
-
 .slice[data-world='helios'] {
   --slice-bg: radial-gradient(140% 60% at 50% 115%, #3fa7c6 0%, #0b2547 38%, #03050b 70%);
 }

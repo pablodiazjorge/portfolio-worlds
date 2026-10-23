@@ -91,5 +91,5 @@ The code (the Angular application, the scenes, the Blender scripts and the asset
 - Textures: Marble 01 and Blue Metal Plate by Rob Tuytel and Dark Wood by Dario Barresi, Dimitrios Savva and Rico Cilliers (Poly Haven, CC0); Marble 014 and Fabric 061 (ambientCG, CC0). Model: Television 02 by Benny Weimer (Poly Haven, CC0).
 - Earth: NASA Blue Marble, Black Marble and cloud imagery, public domain.
 - Generated assets: concept pictures from Qwen-Image (Apache-2.0) and meshes from Microsoft TRELLIS.2 (MIT, with NVIDIA components for research and evaluation only); see `tools/assets/trellis/README.md`.
-- Fonts: Instrument Sans, Fraunces, Unbounded, Syne, Michroma and Cormorant Garamond, all under the SIL Open Font License, served through Fontsource.
+- Fonts: Instrument Sans, Fraunces, Unbounded, Michroma and Cormorant Garamond, all under the SIL Open Font License, served through Fontsource.
 - three.js, Lenis and glTF Transform under their respective licenses.
