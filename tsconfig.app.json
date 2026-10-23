@@ -11,7 +11,6 @@
     "src/**/*.ts"
   ],
   "exclude": [
-    "src/**/*.spec.ts",
-    "src/app/landings/terra/**"
+    "src/**/*.spec.ts"
   ]
 }

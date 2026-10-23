@@ -52,11 +52,6 @@
   letter-spacing: -0.04em;
 }
 
-.veil[data-target='terra'] .veil-name {
-  font-family: var(--font-terra);
-  font-weight: 800;
-}
-
 .veil[data-target='helios'] .veil-name {
   font-family: var(--font-helios);
   font-size: clamp(2rem, 7vw, 5.5rem);
