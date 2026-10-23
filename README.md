@@ -1,5 +1,7 @@
 # portfolio-worlds
 
+> **Status: experiment, finished; not maintained.** A test of programming with local models, MCP and WebGPU; the living portfolio is [pablodiazjorge.com](https://www.pablodiazjorge.com/). See [Limitations](#limitations).
+
 [Versión en español](README.es.md)
 
 My portfolio, told four ways. Every world holds the same content (about, experience, projects and contact) and walks you through it with a different 3D scene, rendered with three.js on WebGPU and falling back to WebGL 2 where WebGPU is not available.
@@ -13,9 +15,9 @@ My portfolio, told four ways. Every world holds the same content (about, experie
 
 Keys 1 to 4 switch worlds from anywhere and 0 returns to the hub. Every page exists in English (`/atlas`) and Spanish (`/es/atlas`), prerendered with its own title, description, Open Graph image and hreflang links.
 
-## A snapshot, not the living portfolio
+## An experiment, not the living portfolio
 
-This site is a technical experiment, not the portfolio I keep up to date. It freezes my profile as of October 2026 and will not follow it from here; the current version lives at [pablodiazjorge.com](https://www.pablodiazjorge.com/). I built it to test, on a real deliverable, a way of working: WebGPU and TSL in production, an asset pipeline that runs Blender from scripts and, above all, development with AI coding agents under my direction, mixing local generation models with hosted ones, MCP servers and the practices that make that work reviewable. The result stands as it is, with the state of the tools and of my experience at that date.
+This site was an experiment, not the portfolio I keep up to date: a test of programming with local models, MCP servers and WebGPU on a real deliverable. It is finished and not maintained. It freezes my profile as of October 2026 and will not follow it from here; the current version lives at [pablodiazjorge.com](https://www.pablodiazjorge.com/). What I set out to try was a way of working: WebGPU and TSL in production, an asset pipeline that runs Blender from scripts and, above all, development with AI coding agents under my direction, mixing local generation models with hosted ones, MCP servers and the practices that make that work reviewable. The result stands as it is, with the state of the tools and of my experience at that date.
 
 ## How it was built
 
@@ -82,6 +84,13 @@ The scripts also work interactively through [Blender MCP](https://github.com/ahu
 
 Import the repository as a new project. `vercel.json` sets the build command, the output directory, immutable caching for hashed files and a few security headers, so no settings are needed in the dashboard. If the site lives somewhere other than `https://worlds.pablodiazjorge.com`, change `SITE_ORIGIN` in `src/app/core/site.service.ts` so canonical and Open Graph URLs point to the right host.
 
+## Limitations
+
+- **Not maintained.** The dependencies and the content stay as they were in October 2026 and will not be updated, security fixes included.
+- **Some files are very long.** `tools/blender/atlas_valley.py` (2,372 lines), `tools/blender/atrium_museum.py` (1,130) and `src/app/landings/atrium/atrium.scene.ts` (1,044) were never split into smaller modules, so they are hard to read and to change.
+- **Large binaries live in git.** About 40 MB of GLB models, textures and images are committed directly, without Git LFS, and the history keeps every earlier version of them. The heaviest are the TRELLIS.2 sources in `tools/assets/trellis/` (up to 7.8 MB each) and the Helios and Atrium models (about 6 MB each), which also make the first load of those two worlds slow on a weak connection.
+- **Few tests.** Four Vitest spec files cover the content, the world registry and the device and DPR helpers. The scenes, the camera rig and the asset pipeline have no automated tests; they were checked by eye, through the Playwright captures described above.
+
 ## Licence
 
 The code (the Angular application, the scenes, the Blender scripts and the asset pipeline) is released under the [MIT License](LICENSE). The portfolio's own content is not: the texts of my profile, experience and projects, the project covers and the hub and link images are personal and not licensed for reuse. The third-party and generated assets keep their own terms, listed in the credits below and in the READMEs next to each of them: the Poly Haven and ambientCG assets are CC0, the NASA imagery is public domain, and the meshes generated with TRELLIS.2 are not for sale.
@@ -91,5 +100,5 @@ The code (the Angular application, the scenes, the Blender scripts and the asset
 - Textures: Marble 01 and Blue Metal Plate by Rob Tuytel and Dark Wood by Dario Barresi, Dimitrios Savva and Rico Cilliers (Poly Haven, CC0); Marble 014 and Fabric 061 (ambientCG, CC0). Model: Television 02 by Benny Weimer (Poly Haven, CC0).
 - Earth: NASA Blue Marble, Black Marble and cloud imagery, public domain.
 - Generated assets: concept pictures from Qwen-Image (Apache-2.0) and meshes from Microsoft TRELLIS.2 (MIT, with NVIDIA components for research and evaluation only); see `tools/assets/trellis/README.md`.
-- Fonts: Instrument Sans, Fraunces, Unbounded, Michroma and Cormorant Garamond, all under the SIL Open Font License, served through Fontsource.
+- Fonts: Instrument Sans, Fraunces, Space Grotesk, VT323, Michroma and Cormorant Garamond, all under the SIL Open Font License, served through Fontsource.
 - three.js, Lenis and glTF Transform under their respective licenses.
