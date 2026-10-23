@@ -1,7 +1,7 @@
 {
   "name": "portfolio-worlds",
   "version": "1.0.0",
-  "description": "The portfolio of Pablo Díaz-Jorge told five ways, as five 3D worlds built with Angular and three.js WebGPU.",
+  "description": "The portfolio of Pablo Díaz-Jorge told four ways, as four 3D worlds built with Angular and three.js WebGPU.",
   "private": true,
   "packageManager": "npm@10.9.8",
   "engines": {
